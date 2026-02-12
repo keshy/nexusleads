@@ -1,0 +1,166 @@
+services:
+  # PostgreSQL Database (also used for job queue)
+  postgres:
+    image: postgres:15-alpine
+    container_name: plg-postgres
+    environment:
+      POSTGRES_DB: plg_lead_sourcer
+      POSTGRES_USER: plg_user
+      POSTGRES_PASSWORD: plg_password
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U plg_user -d plg_lead_sourcer"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - plg-network
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: plg-backend
+    environment:
+      DATABASE_URL: postgresql://plg_user:plg_password@postgres:5432/plg_lead_sourcer
+      SECRET_KEY: ${SECRET_KEY:-dev-secret-key-change-in-production}
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT}
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY}
+      AZURE_OPENAI_DEPLOYMENT: ${AZURE_OPENAI_DEPLOYMENT:-gpt-4o-mini}
+      AZURE_OPENAI_API_VERSION: ${AZURE_OPENAI_API_VERSION:-2024-02-15-preview}
+      SERPER_API_KEY: ${SERPER_API_KEY}
+      CORS_ORIGINS: http://localhost:3000,http://localhost:5173,http://frontend:80
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - plg-network
+
+  # Background Job Processor (uses PostgreSQL for job queue)
+  jobs:
+    build:
+      context: ./jobs
+      dockerfile: Dockerfile
+    container_name: plg-jobs
+    environment:
+      DATABASE_URL: postgresql://plg_user:plg_password@postgres:5432/plg_lead_sourcer
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT}
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY}
+      AZURE_OPENAI_DEPLOYMENT: ${AZURE_OPENAI_DEPLOYMENT:-gpt-4o-mini}
+      AZURE_OPENAI_API_VERSION: ${AZURE_OPENAI_API_VERSION:-2024-02-15-preview}
+      SERPER_API_KEY: ${SERPER_API_KEY}
+      CHECK_INTERVAL_SECONDS: ${CHECK_INTERVAL_SECONDS:-30}
+      MAX_CONCURRENT_JOBS: ${MAX_CONCURRENT_JOBS:-3}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    volumes:
+      - ./jobs:/app
+    command: python job_processor.py
+    restart: unless-stopped
+    networks:
+      - plg-network
+
+  # AI Assistant (Codex-powered chat)
+  assistant:
+    build:
+      context: ./assistant
+      dockerfile: Dockerfile
+    container_name: plg-assistant
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      PLG_API_BASE_URL: http://backend:8000
+      PROJECT_ROOT: /project
+    ports:
+      - "3001:3001"
+    depends_on:
+      backend:
+        condition: service_healthy
+    volumes:
+      - ./assistant:/app
+      - .:/project:ro
+      - ${HOME}/.codex:/home/node/.codex
+    networks:
+      - plg-network
+
+  # Frontend (Development)
+  frontend-dev:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: plg-frontend-dev
+    environment:
+      VITE_API_URL: http://localhost:8000
+      VITE_CODEX_WS_URL: ws://localhost:3001/ws/codex
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    command: npm run dev -- --host
+    networks:
+      - plg-network
+    profiles:
+      - dev
+
+  # Frontend (Production)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: plg-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - plg-network
+    profiles:
+      - prod
+
+
+  # Nginx reverse proxy (Production)
+  nginx:
+    image: nginx:alpine
+    container_name: plg-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - plg-network
+    profiles:
+      - prod
+
+volumes:
+  postgres_data:
+
+networks:
+  plg-network:
+    driver: bridge

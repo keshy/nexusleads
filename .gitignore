@@ -1,0 +1,46 @@
+# Virtual Environment
+.venv/
+virtualenv/
+env/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+.env.production
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Pytest
+.pytest_cache/
+
+# Coverage reports
+.coverage
+coverage.xml
+htmlcov/
+
+# MCP Evaluation results
+eval_results_*.json
+
+# IDEs and editors
+.idea/
+.vscode/
+*.swp
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Go local development files
+go.mod.local
+
+.terraform
+.terragrunt-cache
+
+# Node
+node_modules/
+

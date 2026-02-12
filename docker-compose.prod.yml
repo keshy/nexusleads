@@ -1,0 +1,117 @@
+# Production docker-compose — standalone file for EC2 deployment
+# Usage: docker-compose -f docker-compose.prod.yml up -d
+#
+# Requires a .env file with at minimum:
+#   SECRET_KEY, POSTGRES_PASSWORD
+#
+# All services use baked-in code (no volume mounts).
+# Only nginx port 80 is exposed to the host.
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: plg-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-plg_lead_sourcer}
+      POSTGRES_USER: ${POSTGRES_USER:-plg_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-plg_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-plg_user} -d ${POSTGRES_DB:-plg_lead_sourcer}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - plg-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: plg-backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-plg_user}:${POSTGRES_PASSWORD:-plg_password}@postgres:5432/${POSTGRES_DB:-plg_lead_sourcer}
+      SECRET_KEY: ${SECRET_KEY:-dev-secret-key-change-in-production}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:-}
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
+      AZURE_OPENAI_DEPLOYMENT: ${AZURE_OPENAI_DEPLOYMENT:-gpt-4o-mini}
+      AZURE_OPENAI_API_VERSION: ${AZURE_OPENAI_API_VERSION:-2024-02-15-preview}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      SERPER_API_KEY: ${SERPER_API_KEY:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - plg-network
+
+  jobs:
+    build:
+      context: ./jobs
+      dockerfile: Dockerfile
+    container_name: plg-jobs
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-plg_user}:${POSTGRES_PASSWORD:-plg_password}@postgres:5432/${POSTGRES_DB:-plg_lead_sourcer}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:-}
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
+      AZURE_OPENAI_DEPLOYMENT: ${AZURE_OPENAI_DEPLOYMENT:-gpt-4o-mini}
+      AZURE_OPENAI_API_VERSION: ${AZURE_OPENAI_API_VERSION:-2024-02-15-preview}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      SERPER_API_KEY: ${SERPER_API_KEY:-}
+      CHECK_INTERVAL_SECONDS: ${CHECK_INTERVAL_SECONDS:-30}
+      MAX_CONCURRENT_JOBS: ${MAX_CONCURRENT_JOBS:-3}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    command: python job_processor.py
+    networks:
+      - plg-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: plg-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    networks:
+      - plg-network
+
+  nginx:
+    image: nginx:alpine
+    container_name: plg-nginx
+    restart: unless-stopped
+    ports:
+      - "${LISTEN_PORT:-80}:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - plg-network
+
+volumes:
+  postgres_data:
+
+networks:
+  plg-network:
+    driver: bridge
