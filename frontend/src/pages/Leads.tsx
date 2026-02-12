@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronDown, ChevronRight, ExternalLink, Mail, Building2, UserCheck, FolderKanban, Info, Filter, Factory, X, Sparkles, GitCommitHorizontal } from 'lucide-react'
+import { ChevronDown, ChevronRight, ExternalLink, Mail, Building2, UserCheck, FolderKanban, Info, Filter, Factory, X, Sparkles, GitCommitHorizontal, Send, Download, Loader2 } from 'lucide-react'
+import Toast from '../components/Toast'
 import ScoreTooltip from '../components/ScoreTooltip'
 import StyledSelect from '../components/StyledSelect'
 import { api } from '../lib/api'
@@ -46,6 +47,9 @@ export default function Leads() {
   const [filterIndustry, setFilterIndustry] = useState<string>('')
   const [filterCompany, setFilterCompany] = useState<string>('')
   const [filterSource, setFilterSource] = useState<string>('')
+  const [selectedLeads, setSelectedLeads] = useState<Set<string>>(new Set())
+  const [pushing, setPushing] = useState(false)
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'warning' | 'info' } | null>(null)
 
   useEffect(() => {
     fetchLeadsByProject()
@@ -77,6 +81,61 @@ export default function Leads() {
       }
       return newSet
     })
+  }
+
+  const toggleSelectLead = (leadId: string) => {
+    setSelectedLeads(prev => {
+      const s = new Set(prev)
+      s.has(leadId) ? s.delete(leadId) : s.add(leadId)
+      return s
+    })
+  }
+
+  const toggleSelectAllInProject = (projectId: string) => {
+    const proj = projects.find(p => p.id === projectId)
+    if (!proj) return
+    const filtered = filterLeads(proj.leads)
+    const allSelected = filtered.every(l => selectedLeads.has(l.id))
+    setSelectedLeads(prev => {
+      const s = new Set(prev)
+      filtered.forEach(l => allSelected ? s.delete(l.id) : s.add(l.id))
+      return s
+    })
+  }
+
+  const handleBulkPushClay = async () => {
+    if (selectedLeads.size === 0) return
+    setPushing(true)
+    try {
+      const ids = Array.from(selectedLeads)
+      await api.pushLeadsToClay(ids)
+      setToast({ message: `Pushed ${ids.length} leads to Clay`, type: 'success' })
+      setSelectedLeads(new Set())
+    } catch (err: any) {
+      setToast({ message: err?.response?.data?.detail || 'Failed to push to Clay', type: 'error' })
+    } finally {
+      setPushing(false)
+    }
+  }
+
+  const handleExportCSV = () => {
+    const selected = allLeads.filter(l => selectedLeads.has(l.id))
+    if (selected.length === 0) return
+    const headers = ['Name', 'Username', 'Email', 'Company', 'Position', 'Industry', 'Classification', 'Score', 'LinkedIn', 'GitHub']
+    const rows = selected.map(l => [
+      l.full_name || '', l.username, l.email || '', l.current_company || l.company || '',
+      l.current_position || '', l.industry || '', l.classification || '',
+      l.overall_score?.toFixed(0) || '', l.linkedin_url || '', `https://github.com/${l.username}`
+    ])
+    const csv = [headers, ...rows].map(r => r.map(c => `"${(c || '').replace(/"/g, '""')}"`).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `nexusleads-export-${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+    setToast({ message: `Exported ${selected.length} leads to CSV`, type: 'success' })
   }
 
   const toggleReasoning = (leadId: string) => {
@@ -167,6 +226,37 @@ export default function Leads() {
           </p>
         </div>
       </div>
+
+      {/* Bulk Actions Bar */}
+      {selectedLeads.size > 0 && (
+        <div className="sticky top-0 z-20 bg-gradient-to-r from-cyan-600 to-violet-600 text-white rounded-lg px-5 py-3 flex items-center justify-between shadow-lg">
+          <span className="text-sm font-medium">{selectedLeads.size} lead{selectedLeads.size !== 1 ? 's' : ''} selected</span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleBulkPushClay}
+              disabled={pushing}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white/20 hover:bg-white/30 rounded-lg text-sm font-medium disabled:opacity-50"
+            >
+              {pushing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+              Push to Clay
+            </button>
+            <button
+              onClick={handleExportCSV}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white/20 hover:bg-white/30 rounded-lg text-sm font-medium"
+            >
+              <Download className="w-4 h-4" />
+              Export CSV
+            </button>
+            <button
+              onClick={() => setSelectedLeads(new Set())}
+              className="ml-2 p-1.5 hover:bg-white/20 rounded-lg"
+              title="Clear selection"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Filters */}
       {projects.length > 0 && (
@@ -273,29 +363,37 @@ export default function Leads() {
                 className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden"
               >
                 {/* Project Header */}
-                <button
-                  onClick={() => toggleProject(project.id)}
-                  className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
-                >
+                <div className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
                   <div className="flex items-center space-x-3">
-                    {isExpanded ? (
-                      <ChevronDown className="w-5 h-5 text-gray-500 dark:text-gray-400" />
-                    ) : (
-                      <ChevronRight className="w-5 h-5 text-gray-500 dark:text-gray-400" />
+                    {isExpanded && filterLeads(project.leads).length > 0 && (
+                      <input
+                        type="checkbox"
+                        checked={filterLeads(project.leads).every(l => selectedLeads.has(l.id))}
+                        onChange={() => toggleSelectAllInProject(project.id)}
+                        className="w-4 h-4 rounded border-gray-300 text-cyan-600 focus:ring-cyan-500"
+                        onClick={(e) => e.stopPropagation()}
+                      />
                     )}
-                    <div className="text-left">
-                      <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                        {project.name}
-                      </h3>
-                      {project.description && (
-                        <p className="text-sm text-gray-600 dark:text-gray-400">{project.description}</p>
+                    <button onClick={() => toggleProject(project.id)} className="flex items-center space-x-3">
+                      {isExpanded ? (
+                        <ChevronDown className="w-5 h-5 text-gray-500 dark:text-gray-400" />
+                      ) : (
+                        <ChevronRight className="w-5 h-5 text-gray-500 dark:text-gray-400" />
                       )}
-                    </div>
+                      <div className="text-left">
+                        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                          {project.name}
+                        </h3>
+                        {project.description && (
+                          <p className="text-sm text-gray-600 dark:text-gray-400">{project.description}</p>
+                        )}
+                      </div>
+                    </button>
                   </div>
                   <span className="px-3 py-1 bg-primary text-white text-sm font-medium rounded-full">
                     {filterLeads(project.leads).length} {filterLeads(project.leads).length === 1 ? 'Lead' : 'Leads'}
                   </span>
-                </button>
+                </div>
 
                 {/* Leads List */}
                 {isExpanded && (
@@ -308,9 +406,16 @@ export default function Leads() {
                     {filterLeads(project.leads).map((lead) => (
                       <div
                         key={lead.id}
-                        className="px-6 py-4 hover:bg-gray-50 dark:hover:bg-gray-700/50 border-b border-gray-100 dark:border-gray-700 last:border-b-0"
+                        className={`px-6 py-4 hover:bg-gray-50 dark:hover:bg-gray-700/50 border-b border-gray-100 dark:border-gray-700 last:border-b-0 ${selectedLeads.has(lead.id) ? 'bg-cyan-50/50 dark:bg-cyan-900/10' : ''}`}
                       >
                         <div className="flex items-start space-x-4">
+                          {/* Checkbox */}
+                          <input
+                            type="checkbox"
+                            checked={selectedLeads.has(lead.id)}
+                            onChange={() => toggleSelectLead(lead.id)}
+                            className="mt-3 w-4 h-4 rounded border-gray-300 text-cyan-600 focus:ring-cyan-500 flex-shrink-0"
+                          />
                           {/* Avatar */}
                           <img
                             src={lead.linkedin_profile_photo_url || lead.avatar_url}
@@ -541,6 +646,13 @@ export default function Leads() {
             )
           })}
         </div>
+      )}
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
+        />
       )}
     </div>
   )

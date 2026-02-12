@@ -15,16 +15,24 @@ import {
   Blocks,
   Building2,
   ChevronsUpDown,
+  Wallet,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import MatrixBackground from './MatrixBackground'
 import NexusLogo from './NexusLogo'
+import ChatSidecar from './ChatSidecar'
+import { api } from '../lib/api'
 
 export default function Layout() {
   const { user, logout } = useAuth()
   const { theme, toggleTheme } = useTheme()
   const location = useLocation()
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [creditBalance, setCreditBalance] = useState<number | null>(null)
+
+  useEffect(() => {
+    api.getBillingBalance().then((b: any) => setCreditBalance(b?.credit_balance ?? null)).catch(() => {})
+  }, [])
 
   const orgs = user?.organizations || []
   const activeOrgId = localStorage.getItem('activeOrgId')
@@ -131,6 +139,31 @@ export default function Layout() {
           })}
         </nav>
 
+        {/* Credit Balance */}
+        {creditBalance !== null && sidebarOpen && (
+          <div className="mx-3 mb-1">
+            <Link
+              to="/app/settings"
+              className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gradient-to-r from-emerald-500/10 to-cyan-500/10 border border-emerald-500/20 dark:border-emerald-400/15 hover:border-emerald-500/40 transition-colors"
+            >
+              <Wallet className="w-4 h-4 text-emerald-500 dark:text-emerald-400" />
+              <span className="text-sm font-semibold text-emerald-700 dark:text-emerald-300">${creditBalance.toFixed(2)}</span>
+              <span className="text-[10px] text-gray-500 dark:text-gray-400">credits</span>
+            </Link>
+          </div>
+        )}
+        {creditBalance !== null && !sidebarOpen && (
+          <div className="mx-3 mb-1 flex justify-center">
+            <Link
+              to="/app/settings"
+              className="p-2 rounded-lg bg-gradient-to-r from-emerald-500/10 to-cyan-500/10 border border-emerald-500/20 hover:border-emerald-500/40"
+              title={`$${creditBalance.toFixed(2)} credits`}
+            >
+              <Wallet className="w-5 h-5 text-emerald-500 dark:text-emerald-400" />
+            </Link>
+          </div>
+        )}
+
         {/* User section */}
         <div className="p-4 border-t border-gray-200/80 dark:border-gray-700/80 space-y-2">
           {/* Theme Toggle */}
@@ -170,6 +203,9 @@ export default function Layout() {
       <main className="flex-1 overflow-auto relative z-10">
         <Outlet />
       </main>
+
+      {/* Chat Assistant */}
+      <ChatSidecar />
     </div>
   )
 }

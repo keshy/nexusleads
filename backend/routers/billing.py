@@ -23,8 +23,8 @@ async def get_balance(
     if not billing:
         return {
             "credit_balance": 0.0,
-            "lifetime_credits_purchased": 0.0,
-            "lifetime_credits_used": 0.0,
+            "total_credits_purchased": 0.0,
+            "total_credits_used": 0.0,
             "free_grant_applied": False,
             "auto_reload_enabled": False,
             "auto_reload_threshold": None,
@@ -32,9 +32,9 @@ async def get_balance(
         }
     return {
         "credit_balance": float(billing.credit_balance),
-        "lifetime_credits_purchased": float(billing.lifetime_credits_purchased),
-        "lifetime_credits_used": float(billing.lifetime_credits_used),
-        "free_grant_applied": billing.free_grant_applied,
+        "total_credits_purchased": float(billing.total_credits_purchased),
+        "total_credits_used": float(billing.total_credits_used),
+        "free_grant_applied": False,
         "auto_reload_enabled": billing.auto_reload_enabled,
         "auto_reload_threshold": float(billing.auto_reload_threshold) if billing.auto_reload_threshold else None,
         "auto_reload_amount": float(billing.auto_reload_amount) if billing.auto_reload_amount else None,
@@ -65,7 +65,7 @@ async def list_transactions(
             "amount": float(t.amount),
             "balance_after": float(t.balance_after) if t.balance_after is not None else None,
             "description": t.description,
-            "reference_id": t.reference_id,
+            "reference_id": t.stripe_session_id,
             "created_at": t.created_at.isoformat() if t.created_at else None,
         }
         for t in txns
@@ -97,7 +97,7 @@ async def get_usage_summary(
         or 0
     )
     total_credits_used = (
-        db.query(func.sum(UsageEvent.credits))
+        db.query(func.sum(UsageEvent.cost))
         .filter(UsageEvent.org_id == org_id)
         .scalar()
         or 0.0
