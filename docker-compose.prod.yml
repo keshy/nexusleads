@@ -5,7 +5,7 @@
 #   SECRET_KEY, POSTGRES_PASSWORD
 #
 # All services use baked-in code (no volume mounts).
-# Only nginx port 80 is exposed to the host.
+# Nginx is publicly exposed; Postgres is bound to localhost only for host-run assistant access.
 
 services:
   postgres:
@@ -19,6 +19,8 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./database/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-plg_user} -d ${POSTGRES_DB:-plg_lead_sourcer}"]
       interval: 10s
@@ -103,6 +105,9 @@ services:
       - "${LISTEN_PORT:-80}:80"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - backend
       - frontend

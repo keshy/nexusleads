@@ -521,8 +521,9 @@ export default function ChatSidecar() {
   }
 
   const wsUrl = useMemo(() => {
-    const envUrl = import.meta.env.VITE_CODEX_WS_URL
-    if (envUrl) return envUrl
+    const envUrl = (import.meta.env.VITE_CODEX_WS_URL || '').trim()
+    const isLocalhostEnv = /^wss?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/.test(envUrl)
+    if (envUrl && !(import.meta.env.PROD && isLocalhostEnv)) return envUrl
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     return `${protocol}//${window.location.host}/ws/codex`
   }, [])
@@ -759,9 +760,25 @@ export default function ChatSidecar() {
       return
     }
 
+    const token = localStorage.getItem('token')
+    if (!token) {
+      setStatus('error')
+      const errorMessage: ChatMessage = {
+        id: safeId(),
+        role: 'assistant',
+        type: 'error',
+        text: 'Missing auth token. Please log in again.',
+        createdAt: new Date().toISOString(),
+      }
+      updateMessages((prev) => [...prev, errorMessage])
+      return
+    }
+
     const payload = {
       type: 'chat',
       message: text,
+      token,
+      orgId: localStorage.getItem('activeOrgId') || activeOrg?.id || undefined,
       sessionId: sessionIdRef.current || undefined,
     }
     ws.send(JSON.stringify(payload))

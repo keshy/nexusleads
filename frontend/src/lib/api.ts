@@ -1,6 +1,22 @@
 import axios, { AxiosInstance, InternalAxiosRequestConfig } from 'axios'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+function resolveApiUrl() {
+  const envUrl = (import.meta.env.VITE_API_URL || '').trim()
+  const isLocalhostEnv = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(envUrl)
+
+  // In production, ignore localhost-style build-time env values.
+  if (envUrl && !(import.meta.env.PROD && isLocalhostEnv)) {
+    return envUrl
+  }
+
+  if (typeof window !== 'undefined') {
+    return window.location.origin
+  }
+
+  return 'http://localhost:8000'
+}
+
+const API_URL = resolveApiUrl()
 
 class ApiClient {
   private client: AxiosInstance

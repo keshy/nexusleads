@@ -1,0 +1,56 @@
+# Legacy /plg websocket endpoint compatibility.
+location ^~ /plg/ws/codex {
+    rewrite ^/plg(/ws/codex.*)$ $1 break;
+    proxy_pass http://assistant_upstream;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $connection_upgrade;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_read_timeout 86400s;
+}
+
+# Legacy /plg API endpoint compatibility.
+location ^~ /plg/api/ {
+    rewrite ^/plg(/api/.*)$ $1 break;
+    proxy_pass http://backend_upstream;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+# Redirect legacy /plg frontend routes to root routes.
+location = /plg {
+    return 308 /;
+}
+
+location ^~ /plg/ {
+    rewrite ^/plg/(.*)$ /$1 permanent;
+}
+
+location /ws/codex {
+    proxy_pass http://assistant_upstream;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $connection_upgrade;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_read_timeout 86400s;
+}
+
+location /api/ {
+    proxy_pass http://backend_upstream;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+location / {
+    proxy_pass http://frontend_upstream;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}

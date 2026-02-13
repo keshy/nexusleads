@@ -94,6 +94,20 @@ pip install -r requirements.txt
 python job_processor.py
 ```
 
+### 5. Chat Assistant (Codex)
+
+Run the assistant on the host (local and production):
+
+```bash
+make assistant-local
+```
+
+Docker assistant is optional for local Linux testing only:
+
+```bash
+make up-dev-assistant-docker
+```
+
 ## Configuration
 
 ### Environment Variables

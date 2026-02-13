@@ -39,10 +39,6 @@ app.include_router(billing.router, prefix="/api/billing", tags=["Billing"])
 app.include_router(chat.router, prefix="/api/chat", tags=["Chat"])
 
 
-from codex_bridge import codex_websocket
-app.websocket("/ws/codex")(codex_websocket)
-
-
 @app.get("/")
 async def root():
     """Root endpoint."""

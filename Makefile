@@ -1,4 +1,4 @@
-.PHONY: help install setup-dev setup-prod up up-dev down logs clean test lint db-init db-migrate db-reset build install-git-hooks
+.PHONY: help install setup-dev setup-prod up up-dev up-dev-assistant-docker assistant-local down logs clean test lint db-init db-migrate db-reset build install-git-hooks
 
 # Default target
 help:
@@ -7,6 +7,8 @@ help:
 	@echo "Development:"
 	@echo "  make setup-dev     - Setup development environment"
 	@echo "  make up-dev        - Start development services"
+	@echo "  make up-dev-assistant-docker - Start dev services with assistant in Docker"
+	@echo "  make assistant-local - Run assistant on host (recommended on macOS)"
 	@echo "  make up            - Start production services"
 	@echo "  make down          - Stop all services"
 	@echo "  make logs          - View logs"
@@ -50,6 +52,19 @@ up-dev:
 	@echo "Frontend: http://localhost:5173"
 	@echo "Backend: http://localhost:8000"
 	@echo "API Docs: http://localhost:8000/docs"
+	@echo "Chat assistant: run 'make assistant-local' (recommended on macOS)"
+
+# Start development services including assistant container
+up-dev-assistant-docker:
+	docker-compose --profile dev --profile assistant-docker up -d
+	@echo "✓ Development services started (assistant in Docker)"
+	@echo "Frontend: http://localhost:5173"
+	@echo "Backend: http://localhost:8000"
+	@echo "Assistant WS: ws://localhost:3001/ws/codex"
+
+# Run assistant on host machine (recommended on macOS)
+assistant-local:
+	cd assistant && ./start-local.sh
 
 # Start production services
 up:

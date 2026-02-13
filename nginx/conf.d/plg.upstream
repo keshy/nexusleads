@@ -1,0 +1,12 @@
+# PLG Lead Sourcer — upstream definitions
+upstream frontend_upstream {
+    server frontend:80;
+}
+
+upstream backend_upstream {
+    server backend:8000;
+}
+
+upstream assistant_upstream {
+    server host.docker.internal:3001;
+}

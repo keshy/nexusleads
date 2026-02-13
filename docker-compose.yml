@@ -81,6 +81,7 @@ services:
       - plg-network
 
   # AI Assistant (Codex-powered chat)
+  # Optional in Docker: on macOS local dev, prefer running assistant on host.
   assistant:
     build:
       context: ./assistant
@@ -89,6 +90,7 @@ services:
     environment:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       PLG_API_BASE_URL: http://backend:8000
+      DATABASE_URL: postgresql://plg_user:plg_password@postgres:5432/plg_lead_sourcer
       PROJECT_ROOT: /project
     ports:
       - "3001:3001"
@@ -101,6 +103,8 @@ services:
       - ${HOME}/.codex:/home/node/.codex
     networks:
       - plg-network
+    profiles:
+      - assistant-docker
 
   # Frontend (Development)
   frontend-dev:
@@ -110,7 +114,7 @@ services:
     container_name: plg-frontend-dev
     environment:
       VITE_API_URL: http://localhost:8000
-      VITE_CODEX_WS_URL: ws://localhost:3001/ws/codex
+      VITE_CODEX_WS_URL: ${VITE_CODEX_WS_URL:-ws://localhost:3001/ws/codex}
     ports:
       - "5173:5173"
     depends_on:
@@ -149,6 +153,7 @@ services:
       - "443:443"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
       - ./nginx/ssl:/etc/nginx/ssl:ro
     depends_on:
       - backend

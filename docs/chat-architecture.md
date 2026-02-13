@@ -8,75 +8,109 @@ implemented as a **Codex SDK agent** that queries the database directly via
 
 ## Overview
 
-The chat uses the **OpenAI Codex SDK** (`@openai/codex-sdk`) running on the
-host machine. The agent reads skill files, executes `psql` commands inside a
-sandboxed environment, and streams structured JSON responses to the browser
-over WebSocket. The frontend renders these as rich dashboard widgets, tables,
-bar charts, and status pills — not just plain text.
+The chat is powered by the **OpenAI Codex CLI agent** — the same autonomous
+coding agent you run from the terminal. We do **not** manage the conversation
+loop, tool calling, or skill resolution ourselves. The Codex agent handles all
+of that internally.
+
+Our code is a thin **WebSocket relay** (`codex-bridge.js`) that:
+1. Accepts a user message from the browser
+2. Passes it to `thread.runStreamed()` (Codex SDK)
+3. Forwards the agent's streaming events back to the browser
+
+The Codex agent autonomously:
+- Discovers `.agents/skills/*/SKILL.md` files from the working directory
+- Decides which commands to run (`psql`, `cat`, `ls`, etc.)
+- Executes them in a sandboxed environment
+- Reasons over results across multiple steps
+- Produces a final response
+
+The frontend renders responses as **generative UI** — dashboard widgets,
+tables, bar charts, and status pills — not just plain text.
 
 ```
-┌──────────────────┐   WebSocket       ┌─────────────────────┐   OpenAI API   ┌──────────────┐
-│                  │  ws://localhost    │                     │  (streaming)   │              │
-│   Browser        │  :3001/ws/codex   │  Node.js Assistant  │◄──────────────►│  OpenAI      │
-│   ChatSidecar    │◄─────────────────►│  codex-bridge.js    │                │  GPT Model   │
-│   (React)        │   JSON events     │  (host, port 3001)  │                │              │
-└──────┬───────────┘                   └──────────┬──────────┘                └──────────────┘
-       │                                          │
-       │ REST API                                  │ psql (sandboxed)
-       ▼                                          ▼
-┌──────────────────┐                   ┌──────────────────────┐
-│ /api/chat/convos │                   │ PostgreSQL           │
-│ (CRUD, FastAPI)  │                   │ localhost:5433       │
-└──────┬───────────┘                   │ plg_lead_sourcer DB  │
-       │ reads/writes                  └──────────────────────┘
-       ▼                                          ▲
-┌──────────────────┐                              │ schema reference
-│ Postgres         │                   ┌──────────┴──────────┐
-│ chat_conversations│                  │ .agents/skills/     │
-└──────────────────┘                   │ plg-database/       │
-                                       │ SKILL.md            │
-                                       └─────────────────────┘
+┌──────────────────┐                  ┌──────────────────────────────────────────────────────┐
+│                  │   WebSocket      │  Node.js Process (host, port 3001)                  │
+│   Browser        │  ws://localhost  │                                                      │
+│   ChatSidecar    │  :3001/ws/codex  │  ┌────────────────┐    ┌───────────────────────────┐ │
+│   (React)        │◄────────────────►│  │ codex-bridge.js │    │  Codex CLI Agent          │ │
+│                  │   JSON events    │  │ (WS relay only) │───►│  @openai/codex-sdk        │ │
+└──────┬───────────┘                  │  │                 │◄───│                           │ │
+       │                              │  │ • session mgmt  │    │  • Reads SKILL.md files   │ │
+       │                              │  │ • event forward │    │  • Runs psql, cat, ls     │ │
+       │                              │  │ • format hints  │    │  • Multi-step reasoning   │ │
+       │                              │  └────────────────┘    │  • Manages conversation   │ │
+       │                              │                         │  • Calls OpenAI API       │ │
+       │                              │                         └─────────┬─────────────────┘ │
+       │                              └───────────────────────────────────┼────────────────────┘
+       │                                                                  │
+       │ REST API                                    psql (sandboxed)     │  auto-discovered
+       ▼                                                  │               ▼
+┌──────────────────┐                   ┌──────────────────┴───┐  ┌─────────────────────┐
+│ /api/chat/convos │                   │ PostgreSQL           │  │ .agents/skills/     │
+│ (CRUD, FastAPI)  │                   │ localhost:5433       │  │ plg-database/       │
+└──────┬───────────┘                   │ plg_lead_sourcer DB  │  │ SKILL.md            │
+       │ reads/writes                  └──────────────────────┘  └─────────────────────┘
+       ▼                                                         Agent reads these on its
+┌──────────────────┐                                             own — we do NOT inject
+│ Postgres         │                                             skill content into the
+│ chat_conversations│                                            prompt.
+└──────────────────┘
 ```
 
 ---
 
 ## Components
 
-### 1. Codex Bridge (`assistant/codex-bridge.js`)
+### 1. Codex Bridge (`assistant/codex-bridge.js`) — Thin WebSocket Relay
 
-A Node.js WebSocket server that wraps the `@openai/codex-sdk`. Runs on the
-**host machine** (not in Docker) for local development because the Codex CLI's
-Rust sandbox binary has networking limitations inside Docker Desktop on macOS.
+A Node.js WebSocket server that relays messages between the browser and the
+**Codex CLI agent** (`@openai/codex-sdk`). Runs on the **host machine** (not
+in Docker) for local development because the Codex CLI's Rust sandbox binary
+has networking limitations inside Docker Desktop on macOS.
 
-**Responsibilities:**
+**What the bridge does (relay duties):**
 - Accept WebSocket connections at `/ws/codex`
-- Receive chat messages and stream agent events back
-- Manage Codex thread sessions (start/resume)
-- Pass `DATABASE_URL` to the sandbox environment
-- Send `turn.started` immediately on message receipt (before async init)
+- Pass the user message + output format hints to `thread.runStreamed()`
+- Forward Codex agent events (`agent.action`, `agent.text`, `turn.completed`) to the browser
+- Manage Codex thread sessions (start/resume) for multi-turn conversations
+- Send `turn.started` immediately on message receipt (latency optimization)
 - Pre-warm the Codex SDK module on server start
 
-**Sandbox configuration:**
+**What the bridge does NOT do:**
+- Parse or execute tool calls — the Codex agent does this autonomously
+- Manage conversation history — Codex threads handle multi-turn state
+- Inject skill content into the prompt — the agent discovers skills from the working directory
+- Decide which commands to run — the agent reasons and acts on its own
+
+**Sandbox configuration (passed to the Codex agent):**
 - `sandboxMode: 'danger-full-access'` — allows `psql` to reach localhost
 - `approvalPolicy: 'never'` — auto-approve all commands
 - `skipGitRepoCheck: true`
-- `workingDirectory` set to project root so skills are discoverable
+- `workingDirectory` set to project root so skills are auto-discovered
 
 **Start script:** `assistant/start-local.sh`
 
 ### 2. Database Skill (`.agents/skills/plg-database/SKILL.md`)
 
-A single unified skill that teaches the agent to query PostgreSQL directly.
-Replaces the old per-resource API skills (archived in `.agents/skills-archive/`).
+A single unified skill that teaches the Codex agent to query PostgreSQL
+directly. Replaces the old per-resource API skills (archived in
+`.agents/skills-archive/`).
 
-**Capabilities:**
+The Codex agent **discovers this file automatically** by scanning
+`.agents/skills/*/SKILL.md` in the working directory — the same mechanism
+used when running `codex` from the terminal. Our bridge prompt contains only
+a brief hint (`Use the $plg-database skill...`); the agent resolves the
+skill reference and reads the file content on its own.
+
+**What the skill file provides to the agent:**
 - Full schema reference (projects, repositories, contributors, lead_scores, etc.)
-- `psql` connection via `DATABASE_URL` environment variable
+- `psql` connection pattern via `DATABASE_URL` environment variable
 - JSON output via `json_agg` for structured results
 - Example queries for common operations
 - Write confirmation protocol for INSERT/UPDATE/DELETE
 
-**Query pattern:**
+**Query pattern (agent executes this autonomously):**
 ```bash
 psql "$DATABASE_URL" -t -A -c "SELECT json_agg(t) FROM (...) t"
 ```
@@ -112,6 +146,11 @@ Conversations are stored in Postgres:
 ---
 
 ## Response Types
+
+The bridge prompt includes **output format instructions** so the Codex agent
+returns structured JSON that the frontend can render as generative UI. This is
+the only "custom" part of our prompt — everything else (reasoning, tool
+calling, skill usage, conversation state) is handled by the Codex agent.
 
 The agent chooses the appropriate response format based on the query:
 
@@ -190,15 +229,15 @@ directly.
 
 ```bash
 # Start infrastructure (Postgres, backend, frontend)
-docker compose up -d
+docker compose --profile dev up -d
 
 # Start the assistant on the host
-./assistant/start-local.sh
+make assistant-local
 ```
 
-The assistant must run on the host for macOS local dev due to Codex CLI
-sandbox limitations in Docker Desktop. On Linux (e.g., EC2), it can run
-inside Docker.
+The assistant runs on the host for local and production deployments. This keeps
+the chat stack consistent and avoids Codex sandbox networking issues seen in
+containerized assistant setups.
 
 ---
 
