@@ -110,6 +110,95 @@ async def get_usage_summary(
     }
 
 
+@router.post("/purchase")
+async def purchase_credits(
+    data: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    org_id=Depends(require_org),
+):
+    """Purchase credits (manual top-up). Creates a transaction and updates balance."""
+    from decimal import Decimal
+
+    amount = data.get("amount")
+    if not amount or float(amount) < 10:
+        raise HTTPException(status_code=400, detail="Minimum purchase is $10.00")
+
+    amount_dec = Decimal(str(amount))
+
+    billing = db.query(OrgBilling).filter(OrgBilling.org_id == org_id).first()
+    if not billing:
+        billing = OrgBilling(org_id=org_id, credit_balance=0, total_credits_purchased=0, total_credits_used=0)
+        db.add(billing)
+        db.flush()
+
+    new_balance = billing.credit_balance + amount_dec
+    billing.credit_balance = new_balance
+    billing.total_credits_purchased = billing.total_credits_purchased + amount_dec
+
+    txn = CreditTransaction(
+        org_id=org_id,
+        type="purchase",
+        amount=amount_dec,
+        balance_after=new_balance,
+        description=f"Manual credit purchase (${amount_dec:.2f})",
+    )
+    db.add(txn)
+    db.commit()
+
+    return {
+        "status": "ok",
+        "credit_balance": float(new_balance),
+        "transaction_id": str(txn.id),
+    }
+
+
+@router.post("/checkout")
+async def create_checkout_session(
+    data: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    org_id=Depends(require_org),
+):
+    """Create a Stripe checkout session for credit purchase."""
+    import os
+
+    stripe_key = os.environ.get("STRIPE_SECRET_KEY")
+    amount = data.get("amount", 10)
+
+    if not stripe_key:
+        # Stripe not configured — fall back to manual purchase
+        raise HTTPException(status_code=400, detail="Stripe is not configured. Use manual purchase instead.")
+
+    try:
+        import stripe
+        stripe.api_key = stripe_key
+
+        success_url = data.get("success_url", "http://localhost:5173/app/settings?billing=success")
+        cancel_url = data.get("cancel_url", "http://localhost:5173/app/settings?billing=cancel")
+
+        session = stripe.checkout.Session.create(
+            payment_method_types=["card"],
+            line_items=[{
+                "price_data": {
+                    "currency": "usd",
+                    "product_data": {"name": f"NexusLeads Credits (${amount:.2f})"},
+                    "unit_amount": int(float(amount) * 100),
+                },
+                "quantity": 1,
+            }],
+            mode="payment",
+            success_url=success_url,
+            cancel_url=cancel_url,
+            metadata={"org_id": str(org_id), "amount": str(amount)},
+        )
+        return {"checkout_url": session.url, "session_id": session.id}
+    except ImportError:
+        raise HTTPException(status_code=400, detail="Stripe SDK not installed. Use manual purchase.")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.put("/auto-reload")
 async def update_auto_reload(
     data: dict,

@@ -1,6 +1,6 @@
 import { useState, useEffect, FormEvent } from 'react'
 import { useAuth } from '../contexts/AuthContext'
-import { User, Users, UserPlus, Trash2, Shield, Mail, Calendar, Save, Key, Eye, EyeOff, CheckCircle, XCircle, RotateCcw, HelpCircle, ExternalLink, AlertTriangle, Info, Lock, CreditCard, ArrowUpRight, ArrowDownRight, Loader2, RefreshCw } from 'lucide-react'
+import { User, Users, UserPlus, Trash2, Shield, Mail, Calendar, Save, Key, Eye, EyeOff, CheckCircle, XCircle, RotateCcw, HelpCircle, ExternalLink, AlertTriangle, Info, Lock, CreditCard, ArrowUpRight, ArrowDownRight, Loader2, RefreshCw, Plus, DollarSign } from 'lucide-react'
 import { api } from '../lib/api'
 import Toast from '../components/Toast'
 
@@ -57,6 +57,8 @@ export default function Settings() {
   const [autoReloadEnabled, setAutoReloadEnabled] = useState(false)
   const [autoReloadThreshold, setAutoReloadThreshold] = useState('1.00')
   const [autoReloadAmount, setAutoReloadAmount] = useState('10.00')
+  const [purchaseAmount, setPurchaseAmount] = useState<number>(10)
+  const [purchasing, setPurchasing] = useState(false)
 
   // API Keys state
   const [appSettings, setAppSettings] = useState<AppSettingData[]>([])
@@ -105,6 +107,38 @@ export default function Settings() {
       console.error('Failed to load billing', err)
     } finally {
       setBillingLoading(false)
+    }
+  }
+
+  const handlePurchaseCredits = async () => {
+    if (purchaseAmount < 10) {
+      setToast({ message: 'Minimum purchase is $10.00', type: 'warning' })
+      return
+    }
+    setPurchasing(true)
+    try {
+      // Try Stripe checkout first
+      try {
+        const result = await api.createCheckoutSession(
+          purchaseAmount,
+          `${window.location.origin}/app/settings?billing=success`,
+          `${window.location.origin}/app/settings?billing=cancel`
+        )
+        if (result.checkout_url) {
+          window.location.href = result.checkout_url
+          return
+        }
+      } catch {
+        // Stripe not configured, fall back to manual purchase
+      }
+      // Manual purchase fallback
+      await api.purchaseCredits(purchaseAmount)
+      setToast({ message: `Added $${purchaseAmount.toFixed(2)} in credits!`, type: 'success' })
+      fetchBilling()
+    } catch (err: any) {
+      setToast({ message: err?.response?.data?.detail || 'Purchase failed', type: 'error' })
+    } finally {
+      setPurchasing(false)
     }
   }
 
@@ -854,6 +888,80 @@ export default function Settings() {
                     </div>
                     <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">Total Used</div>
                   </div>
+                </div>
+              </div>
+
+              {/* Low Balance Warning */}
+              {billingBalance && billingBalance.credit_balance < 5 && (
+                <div className="flex items-center gap-3 px-4 py-3 rounded-lg border border-amber-400/30 bg-amber-50 dark:bg-amber-900/20">
+                  <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0" />
+                  <div className="text-sm">
+                    <span className="font-medium text-amber-800 dark:text-amber-300">Low balance</span>
+                    <span className="text-amber-700 dark:text-amber-400"> — Your credit balance is below $5.00. Add credits to continue running enrichment jobs.</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Add Money */}
+              <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
+                  <Plus className="w-5 h-5 text-emerald-500" />
+                  Add Credits
+                </h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+                  Purchase credits to run enrichment jobs. Minimum $10, increments of $10.
+                </p>
+                <div className="flex flex-wrap gap-2 mb-4">
+                  {[10, 20, 50, 100].map(amt => (
+                    <button
+                      key={amt}
+                      onClick={() => setPurchaseAmount(amt)}
+                      className={`px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                        purchaseAmount === amt
+                          ? 'bg-emerald-100 dark:bg-emerald-900/40 border-emerald-400 text-emerald-700 dark:text-emerald-300'
+                          : 'bg-gray-50 dark:bg-gray-700 border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:border-gray-400'
+                      }`}
+                    >
+                      ${amt}
+                    </button>
+                  ))}
+                  <div className="flex items-center gap-1">
+                    <DollarSign className="w-4 h-4 text-gray-400" />
+                    <input
+                      type="number"
+                      min="10"
+                      step="10"
+                      value={purchaseAmount}
+                      onChange={(e) => setPurchaseAmount(Math.max(10, parseInt(e.target.value) || 10))}
+                      className="w-20 px-2 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 text-sm"
+                    />
+                  </div>
+                </div>
+                <button
+                  onClick={handlePurchaseCredits}
+                  disabled={purchasing}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium disabled:opacity-60 transition-colors"
+                >
+                  {purchasing ? <Loader2 className="w-4 h-4 animate-spin" /> : <CreditCard className="w-4 h-4" />}
+                  {purchasing ? 'Processing...' : `Purchase $${purchaseAmount.toFixed(2)} Credits`}
+                </button>
+                <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+                  <h4 className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Volume Pricing</h4>
+                  <div className="grid grid-cols-3 gap-3 text-center">
+                    <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2">
+                      <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">1K credits</div>
+                      <div className="text-xs text-emerald-600 dark:text-emerald-400">10% off</div>
+                    </div>
+                    <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2">
+                      <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">5K credits</div>
+                      <div className="text-xs text-emerald-600 dark:text-emerald-400">20% off</div>
+                    </div>
+                    <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2">
+                      <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">25K credits</div>
+                      <div className="text-xs text-emerald-600 dark:text-emerald-400">30% off</div>
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-gray-400 mt-2">1 credit = 1 enrichment. Managed keys: $0.05/credit. BYOK: $0.02/credit.</p>
                 </div>
               </div>
 

@@ -9,7 +9,8 @@ from auth import get_current_active_user
 from org_context import require_org
 from models import (
     User, Contributor, ContributorStats, SocialContext, 
-    LeadScore, Project, Repository, RepositoryContributor
+    LeadScore, Project, Repository, RepositoryContributor,
+    ClayPushLog
 )
 from schemas import (
     ContributorResponse, LeadDetail, ContributorStatsResponse,
@@ -118,6 +119,15 @@ async def get_leads_by_project(
             ).first()
             return stat[0] if stat else 'commit'
 
+        # Helper to check if a contributor was pushed to Clay
+        def get_clay_pushed_at(contributor_id):
+            log = db.query(ClayPushLog.pushed_at).filter(
+                ClayPushLog.org_id == org_id,
+                ClayPushLog.contributor_id == contributor_id,
+                ClayPushLog.status == 'success'
+            ).order_by(desc(ClayPushLog.pushed_at)).first()
+            return log[0].isoformat() if log else None
+
         # Build leads list
         leads_list = []
         for contributor, social_context, lead_score in leads:
@@ -141,7 +151,8 @@ async def get_leads_by_project(
                 "influence_score": float(lead_score.influence_score) if lead_score and lead_score.influence_score else 0,
                 "position_score": float(lead_score.position_score) if lead_score and lead_score.position_score else 0,
                 "engagement_score": float(lead_score.engagement_score) if lead_score and lead_score.engagement_score else 0,
-                "source": get_source(contributor.id)
+                "source": get_source(contributor.id),
+                "clay_pushed_at": get_clay_pushed_at(contributor.id)
             })
         
         # Get other contributors (KEY_CONTRIBUTOR or unclassified)
@@ -181,7 +192,8 @@ async def get_leads_by_project(
                 "influence_score": float(lead_score.influence_score) if lead_score and lead_score.influence_score else 0,
                 "position_score": float(lead_score.position_score) if lead_score and lead_score.position_score else 0,
                 "engagement_score": float(lead_score.engagement_score) if lead_score and lead_score.engagement_score else 0,
-                "source": get_source(contributor.id)
+                "source": get_source(contributor.id),
+                "clay_pushed_at": get_clay_pushed_at(contributor.id)
             })
 
         result.append({

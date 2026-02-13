@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { api } from '../lib/api'
 import {
   Blocks, ExternalLink, CheckCircle2, XCircle, AlertCircle,
-  Send, Activity, BarChart3, Clock, ChevronRight, Loader2,
+  Send, Activity, BarChart3, Clock, ChevronRight, Loader2, Lock, ArrowRight,
 } from 'lucide-react'
 
 interface ClayConfig {
@@ -26,12 +26,12 @@ interface ActivityLog {
 }
 
 const COMING_SOON_TILES = [
-  { name: 'Apollo', desc: 'Enrich leads with Apollo.io contact data', status: 'coming_soon' as const },
-  { name: 'Salesforce', desc: 'Sync leads to Salesforce CRM', status: 'enterprise' as const },
-  { name: 'HubSpot', desc: 'Push leads into HubSpot contacts', status: 'enterprise' as const },
-  { name: 'Outreach', desc: 'Add leads to Outreach sequences', status: 'enterprise' as const },
-  { name: 'Slack', desc: 'Get notified about new qualified leads', status: 'enterprise' as const },
-  { name: 'Webhooks', desc: 'Send lead data to any endpoint', status: 'enterprise' as const },
+  { name: 'Apollo', desc: 'Enrich leads with Apollo.io contact data', status: 'coming_soon' as const, features: ['Contact data enrichment', 'Verified email addresses', 'Company intelligence'] },
+  { name: 'Salesforce', desc: 'Sync leads to Salesforce CRM', status: 'enterprise' as const, features: ['Auto-create contacts from qualified leads', 'Map NexusLeads scores to Salesforce fields', 'Bi-directional sync for lead status', 'Custom field mapping'] },
+  { name: 'HubSpot', desc: 'Push leads into HubSpot contacts', status: 'enterprise' as const, features: ['Create contacts and deals automatically', 'Sync lead scores and classifications', 'Trigger workflows on new leads', 'Custom property mapping'] },
+  { name: 'Outreach', desc: 'Add leads to Outreach sequences', status: 'enterprise' as const, features: ['Add leads to sequences automatically', 'Personalize with NexusLeads enrichment data', 'Track engagement back to source repo', 'A/B test messaging by lead classification'] },
+  { name: 'Slack', desc: 'Get notified about new qualified leads', status: 'enterprise' as const, features: ['Real-time alerts for high-score leads', 'Configurable notification rules', 'Channel-per-project routing', 'Rich lead preview cards'] },
+  { name: 'Webhooks', desc: 'Send lead data to any endpoint', status: 'enterprise' as const, features: ['Push to any HTTP endpoint', 'Configurable payload format', 'Retry on failure', 'Event filtering by score/classification'] },
 ]
 
 export default function Integrations() {
@@ -44,6 +44,7 @@ export default function Integrations() {
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ status: string; message?: string } | null>(null)
   const [loading, setLoading] = useState(true)
+  const [gatedModal, setGatedModal] = useState<typeof COMING_SOON_TILES[0] | null>(null)
 
   useEffect(() => {
     loadData()
@@ -105,7 +106,18 @@ export default function Integrations() {
         <h1 className="text-2xl font-bold text-white flex items-center gap-2">
           <Blocks className="w-6 h-6 text-cyan-400" /> Integrations
         </h1>
-        <p className="text-gray-400 mt-1">Connect your lead pipeline to external tools</p>
+        <p className="text-gray-400 mt-1">Connect NexusLeads to your sales stack. Push enriched leads directly into the tools your team already uses.</p>
+      </div>
+
+      {/* Pipeline Banner */}
+      <div className="rounded-xl border border-cyan-500/20 bg-gradient-to-r from-cyan-950/40 to-violet-950/40 p-5">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-xs font-medium text-cyan-400 uppercase tracking-wider mb-1">Your Pipeline</div>
+            <div className="text-lg font-semibold text-white">Source <ArrowRight className="w-4 h-4 inline mx-1 text-gray-500" /> Enrich <ArrowRight className="w-4 h-4 inline mx-1 text-gray-500" /> Score <ArrowRight className="w-4 h-4 inline mx-1 text-cyan-400" /> <span className="text-cyan-400">ACT</span></div>
+          </div>
+          <p className="text-sm text-gray-400 max-w-xs text-right">NexusLeads finds the leads. These integrations close them.</p>
+        </div>
       </div>
 
       {/* Tile grid */}
@@ -133,30 +145,25 @@ export default function Integrations() {
           </div>
         </button>
 
-        {/* Coming soon tiles */}
+        {/* Coming soon / enterprise tiles */}
         {COMING_SOON_TILES.map((tile) => (
-          <div
+          <button
             key={tile.name}
-            className="p-5 rounded-xl border border-gray-800 bg-gray-900/50 opacity-60"
+            onClick={() => setGatedModal(tile)}
+            className="text-left p-5 rounded-xl border border-gray-800 bg-gray-900/50 opacity-70 hover:opacity-90 hover:border-gray-600 transition-all"
           >
             <div className="flex items-center justify-between mb-3">
               <span className="text-lg font-semibold text-white">{tile.name}</span>
-              <span className="text-[10px] uppercase tracking-wider text-gray-500 border border-gray-700 rounded px-1.5 py-0.5">
+              <span className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-gray-500 border border-gray-700 rounded px-1.5 py-0.5">
+                {tile.status === 'enterprise' && <Lock className="w-3 h-3" />}
                 {tile.status === 'enterprise' ? 'Enterprise' : 'Coming Soon'}
               </span>
             </div>
             <p className="text-gray-500 text-sm">{tile.desc}</p>
-            {tile.status === 'enterprise' && (
-              <a
-                href="https://calendly.com/keshi8"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mt-3 inline-flex items-center gap-1 text-xs text-cyan-400 hover:text-cyan-300"
-              >
-                Book a Call <ExternalLink className="w-3 h-3" />
-              </a>
-            )}
-          </div>
+            <div className="mt-3 text-xs text-cyan-400 flex items-center gap-1">
+              Learn more <ChevronRight className="w-3 h-3" />
+            </div>
+          </button>
         ))}
       </div>
 
@@ -252,6 +259,47 @@ export default function Integrations() {
               </div>
             </div>
           )}
+        </div>
+      )}
+      {/* Gated Integration Modal */}
+      {gatedModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={() => setGatedModal(null)}>
+          <div className="bg-gray-900 border border-gray-700 rounded-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 mb-3">
+              {gatedModal.status === 'enterprise' && <Lock className="w-5 h-5 text-violet-400" />}
+              <h3 className="text-lg font-semibold text-white">{gatedModal.name} Integration</h3>
+            </div>
+            <p className="text-sm text-gray-400 mb-4">{gatedModal.desc}</p>
+            <ul className="space-y-2 mb-6">
+              {gatedModal.features.map((f) => (
+                <li key={f} className="flex items-start gap-2 text-sm text-gray-300">
+                  <CheckCircle2 className="w-4 h-4 text-cyan-400 mt-0.5 shrink-0" />
+                  {f}
+                </li>
+              ))}
+            </ul>
+            {gatedModal.status === 'enterprise' ? (
+              <div className="space-y-3">
+                <p className="text-sm text-gray-500">Available on the Enterprise plan.</p>
+                <div className="flex items-center gap-3">
+                  <a
+                    href="https://calendly.com/keshi8"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-4 py-2 bg-gradient-to-r from-cyan-600 to-violet-600 hover:from-cyan-500 hover:to-violet-500 text-white rounded-lg text-sm font-medium inline-flex items-center gap-2"
+                  >
+                    Book a Call <ExternalLink className="w-3 h-3" />
+                  </a>
+                  <button onClick={() => setGatedModal(null)} className="px-4 py-2 border border-gray-600 text-gray-400 rounded-lg text-sm">Close</button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-sm text-gray-500">This integration is coming soon.</p>
+                <button onClick={() => setGatedModal(null)} className="px-4 py-2 border border-gray-600 text-gray-400 rounded-lg text-sm">Close</button>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

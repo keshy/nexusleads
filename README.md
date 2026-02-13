@@ -168,6 +168,16 @@ cd frontend
 npm test
 ```
 
+### Git Secret Scanning (Pre-commit)
+
+Enable the repo-managed pre-commit hook:
+
+```bash
+make install-git-hooks
+```
+
+This enforces a `gitleaks` scan before each commit. If needed, install it with `brew install gitleaks`.
+
 ### Database Migrations
 
 ```bash

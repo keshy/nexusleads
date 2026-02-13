@@ -1,18 +1,21 @@
-"""Claude (Anthropic) WebSocket bridge embedded in the backend."""
+"""Azure OpenAI WebSocket bridge embedded in the backend."""
 import asyncio
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import httpx
-from anthropic import AsyncAnthropic
+from openai import AsyncAzureOpenAI
 from fastapi import WebSocket, WebSocketDisconnect
 
+logger = logging.getLogger("codex_bridge")
+
 PROJECT_ROOT = Path(os.getenv("CODEX_PROJECT_ROOT", Path(__file__).resolve().parents[1]))
-CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-3-5-sonnet-20240620")
-STREAM_CHUNK_SIZE = int(os.getenv("CLAUDE_STREAM_CHUNK_SIZE", "80"))
-STREAM_DELAY_MS = int(os.getenv("CLAUDE_STREAM_DELAY_MS", "12"))
+AZURE_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o-mini")
+STREAM_CHUNK_SIZE = int(os.getenv("CHAT_STREAM_CHUNK_SIZE", "80"))
+STREAM_DELAY_MS = int(os.getenv("CHAT_STREAM_DELAY_MS", "12"))
 
 sessions: Dict[str, Dict[str, Any]] = {}
 
@@ -92,17 +95,20 @@ def _build_system_prompt(org_id: Optional[str], confirmed_id: Optional[str]) -> 
 
 TOOLS = [
     {
-        "name": "plg_api_request",
-        "description": "Call the PLG Lead Sourcer REST API. Use for read or write actions.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "method": {"type": "string", "description": "HTTP method (GET, POST, PUT, DELETE)"},
-                "path": {"type": "string", "description": "API path starting with /api/"},
-                "params": {"type": "object", "description": "Query string parameters"},
-                "body": {"type": "object", "description": "JSON body for POST/PUT requests"},
+        "type": "function",
+        "function": {
+            "name": "plg_api_request",
+            "description": "Call the PLG Lead Sourcer REST API. Use for read or write actions.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "method": {"type": "string", "description": "HTTP method (GET, POST, PUT, DELETE)"},
+                    "path": {"type": "string", "description": "API path starting with /api/"},
+                    "params": {"type": "object", "description": "Query string parameters"},
+                    "body": {"type": "object", "description": "JSON body for POST/PUT requests"},
+                },
+                "required": ["method", "path"],
             },
-            "required": ["method", "path"],
         },
     }
 ]
@@ -120,26 +126,35 @@ async def _execute_api_call(
     if not path.startswith("/api/"):
         return json.dumps({"error": "Path must start with /api/"})
 
+    # Always call ourselves on localhost inside the container
+    effective_base = os.getenv("PLG_API_BASE_URL") or base_url
+    logger.info("[api_call] %s %s base=%s", method, path, effective_base)
+
     headers = {"Authorization": f"Bearer {token}"}
     if org_id:
         headers["X-Org-Id"] = org_id
 
-    async with httpx.AsyncClient(base_url=base_url, timeout=30.0) as client:
-        response = await client.request(
-            method=method.upper(),
-            url=path,
-            params=params,
-            json=body if method.upper() in {"POST", "PUT", "PATCH"} else None,
-            headers=headers,
-        )
-        try:
-            data = response.json()
-        except ValueError:
-            data = {"status_code": response.status_code, "text": response.text}
-        return json.dumps(data)
+    try:
+        async with httpx.AsyncClient(base_url=effective_base, timeout=30.0) as client:
+            response = await client.request(
+                method=method.upper(),
+                url=path,
+                params=params,
+                json=body if method.upper() in {"POST", "PUT", "PATCH"} else None,
+                headers=headers,
+            )
+            logger.info("[api_call] %s %s -> %s", method, path, response.status_code)
+            try:
+                data = response.json()
+            except ValueError:
+                data = {"status_code": response.status_code, "text": response.text}
+            return json.dumps(data)
+    except Exception as exc:
+        logger.error("[api_call] %s %s failed: %s", method, path, exc)
+        return json.dumps({"error": str(exc)})
 
 
-async def _run_claude(
+async def _run_llm(
     websocket: WebSocket,
     message: str,
     token: str,
@@ -148,36 +163,76 @@ async def _run_claude(
     session_id: str,
     confirmed_id: Optional[str],
 ):
-    client = AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-    if not os.getenv("ANTHROPIC_API_KEY"):
-        await websocket.send_json({"type": "error", "message": "Missing ANTHROPIC_API_KEY"})
+    endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+    api_key = os.getenv("AZURE_OPENAI_API_KEY")
+    api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-06-01")
+
+    if not endpoint or not api_key:
+        await websocket.send_json({"type": "error", "message": "Missing AZURE_OPENAI_ENDPOINT or AZURE_OPENAI_API_KEY"})
         return
 
-    session = sessions.get(session_id) or {"messages": []}
-    messages = session.get("messages", [])
+    client = AsyncAzureOpenAI(
+        azure_endpoint=endpoint,
+        api_key=api_key,
+        api_version=api_version,
+    )
 
-    messages.append({"role": "user", "content": [{"type": "text", "text": message}]})
+    session = sessions.get(session_id) or {"messages": []}
+    messages: List[Dict[str, Any]] = session.get("messages", [])
+
+    system_prompt = _build_system_prompt(org_id, confirmed_id)
+
+    # Ensure system message is first
+    if not messages or messages[0].get("role") != "system":
+        messages.insert(0, {"role": "system", "content": system_prompt})
+    else:
+        messages[0] = {"role": "system", "content": system_prompt}
+
+    messages.append({"role": "user", "content": message})
 
     await websocket.send_json({"type": "session.id", "sessionId": session_id})
     await websocket.send_json({"type": "turn.started"})
 
-    system_prompt = _build_system_prompt(org_id, confirmed_id)
+    max_tool_rounds = 10
+    for round_num in range(max_tool_rounds):
+        logger.info("[llm] round %d, %d messages", round_num, len(messages))
+        try:
+            response = await client.chat.completions.create(
+                model=AZURE_DEPLOYMENT,
+                max_tokens=1024,
+                messages=messages,
+                tools=TOOLS,
+                tool_choice="auto",
+            )
+        except Exception as exc:
+            logger.error("[llm] Azure OpenAI error: %s", exc)
+            await websocket.send_json({"type": "error", "message": f"LLM error: {exc}"})
+            return
 
-    while True:
-        response = await client.messages.create(
-            model=CLAUDE_MODEL,
-            max_tokens=1024,
-            system=system_prompt,
-            messages=messages,
-            tools=TOOLS,
-        )
+        choice = response.choices[0]
+        assistant_msg = choice.message
+        logger.info("[llm] finish_reason=%s tool_calls=%s", choice.finish_reason, bool(assistant_msg.tool_calls))
 
-        if response.stop_reason == "tool_use":
-            tool_results = []
-            for block in response.content:
-                if block.type != "tool_use":
-                    continue
-                tool_input = block.input or {}
+        # Append assistant message to history
+        msg_dict: Dict[str, Any] = {"role": "assistant", "content": assistant_msg.content or ""}
+        if assistant_msg.tool_calls:
+            msg_dict["tool_calls"] = [
+                {
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+                }
+                for tc in assistant_msg.tool_calls
+            ]
+        messages.append(msg_dict)
+
+        if choice.finish_reason == "tool_calls" or assistant_msg.tool_calls:
+            for tc in assistant_msg.tool_calls or []:
+                try:
+                    tool_input = json.loads(tc.function.arguments)
+                except json.JSONDecodeError:
+                    tool_input = {}
+
                 method = (tool_input.get("method") or "GET").upper()
                 path = tool_input.get("path") or ""
                 params = tool_input.get("params") or None
@@ -191,33 +246,25 @@ async def _run_claude(
                 })
 
                 if method in {"POST", "PUT", "DELETE", "PATCH"} and not confirmed_id:
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
                         "content": "Write action blocked. Ask the user for confirmation.",
-                        "is_error": True,
                     })
                     continue
 
                 result = await _execute_api_call(
                     api_base_url, token, org_id, method, path, params, body
                 )
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": block.id,
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
                     "content": result,
                 })
-
-            messages.append({"role": "assistant", "content": response.content})
-            messages.append({"role": "user", "content": tool_results})
             continue
 
-        # Final response
-        text_parts = []
-        for block in response.content:
-            if block.type == "text":
-                text_parts.append(block.text or "")
-        final_text = "".join(text_parts).strip() or json.dumps({"type": "message", "text": "No response."})
+        # Final response — no more tool calls
+        final_text = (assistant_msg.content or "").strip() or json.dumps({"type": "message", "text": "No response."})
 
         # Stream partial text updates for a smoother UX.
         if final_text:
@@ -235,13 +282,19 @@ async def _run_claude(
             "text": final_text,
             "status": "done",
         })
+
+        usage_dict = None
+        if response.usage:
+            usage_dict = {
+                "prompt_tokens": response.usage.prompt_tokens,
+                "completion_tokens": response.usage.completion_tokens,
+            }
         await websocket.send_json({
             "type": "turn.completed",
             "text": final_text,
-            "usage": response.usage,
+            "usage": usage_dict,
         })
 
-        messages.append({"role": "assistant", "content": response.content})
         session["messages"] = messages
         sessions[session_id] = session
         break
@@ -280,14 +333,14 @@ async def codex_websocket(websocket: WebSocket):
                 await websocket.send_json({"type": "error", "message": "Missing bearer token"})
                 continue
 
-            session_id = msg.get("sessionId") or f"claude_{os.urandom(6).hex()}"
+            session_id = msg.get("sessionId") or f"aoai_{os.urandom(6).hex()}"
             confirmed_id = None
             if message.lower().startswith("confirm_action:"):
                 confirmed_id = message.split(":", 1)[1].strip() or None
 
             api_base_url = msg.get("apiBaseUrl") or os.getenv("PLG_API_BASE_URL", "http://localhost:8000")
 
-            await _run_claude(
+            await _run_llm(
                 websocket,
                 message,
                 token,

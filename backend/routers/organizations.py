@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from auth import get_current_active_user
 from org_context import require_org, require_org_admin
-from models import User, Organization, OrgMember
+from models import User, Organization, OrgMember, OrgBilling, CreditTransaction
 from schemas import OrgCreate, OrgResponse, OrgMemberResponse, OrgAddMember
 
 router = APIRouter()
@@ -31,6 +31,27 @@ async def create_organization(
 
     member = OrgMember(org_id=org.id, user_id=current_user.id, role="owner")
     db.add(member)
+
+    # $5 free grant for new organizations
+    from decimal import Decimal
+    free_grant = Decimal("5.00")
+    billing = OrgBilling(
+        org_id=org.id,
+        credit_balance=free_grant,
+        total_credits_purchased=free_grant,
+        total_credits_used=Decimal("0"),
+    )
+    db.add(billing)
+    db.flush()
+    grant_txn = CreditTransaction(
+        org_id=org.id,
+        type="grant",
+        amount=free_grant,
+        balance_after=free_grant,
+        description="Welcome grant — $5.00 free credits",
+    )
+    db.add(grant_txn)
+
     db.commit()
     db.refresh(org)
 

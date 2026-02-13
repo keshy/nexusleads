@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronDown, ChevronRight, ExternalLink, Mail, Building2, UserCheck, FolderKanban, Info, Filter, Factory, X, Sparkles, GitCommitHorizontal, Send, Download, Loader2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, ExternalLink, Mail, Building2, UserCheck, FolderKanban, Info, Filter, Factory, X, Sparkles, GitCommitHorizontal, Send, Download, Loader2, Cloud, Blocks } from 'lucide-react'
 import Toast from '../components/Toast'
 import ScoreTooltip from '../components/ScoreTooltip'
 import StyledSelect from '../components/StyledSelect'
@@ -27,6 +27,7 @@ interface Lead {
   position_score: number
   engagement_score: number
   source?: string
+  clay_pushed_at?: string
 }
 
 interface Project {
@@ -49,10 +50,14 @@ export default function Leads() {
   const [filterSource, setFilterSource] = useState<string>('')
   const [selectedLeads, setSelectedLeads] = useState<Set<string>>(new Set())
   const [pushing, setPushing] = useState(false)
+  const [pushingLeadId, setPushingLeadId] = useState<string | null>(null)
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'warning' | 'info' } | null>(null)
+  const [clayConfigured, setClayConfigured] = useState<boolean | null>(null)
+  const [showPushConfirm, setShowPushConfirm] = useState(false)
 
   useEffect(() => {
     fetchLeadsByProject()
+    api.getClayConfig().then((c: any) => setClayConfigured(c?.connected || false)).catch(() => setClayConfigured(false))
   }, [filterSource])
 
   const fetchLeadsByProject = async () => {
@@ -105,16 +110,35 @@ export default function Leads() {
 
   const handleBulkPushClay = async () => {
     if (selectedLeads.size === 0) return
+    setShowPushConfirm(true)
+  }
+
+  const confirmBulkPush = async () => {
+    setShowPushConfirm(false)
     setPushing(true)
     try {
       const ids = Array.from(selectedLeads)
       await api.pushLeadsToClay(ids)
       setToast({ message: `Pushed ${ids.length} leads to Clay`, type: 'success' })
       setSelectedLeads(new Set())
+      fetchLeadsByProject()
     } catch (err: any) {
       setToast({ message: err?.response?.data?.detail || 'Failed to push to Clay', type: 'error' })
     } finally {
       setPushing(false)
+    }
+  }
+
+  const handleSinglePushClay = async (leadId: string) => {
+    setPushingLeadId(leadId)
+    try {
+      await api.pushLeadsToClay([leadId])
+      setToast({ message: 'Lead pushed to Clay', type: 'success' })
+      fetchLeadsByProject()
+    } catch (err: any) {
+      setToast({ message: err?.response?.data?.detail || 'Failed to push to Clay', type: 'error' })
+    } finally {
+      setPushingLeadId(null)
     }
   }
 
@@ -255,6 +279,19 @@ export default function Leads() {
               <X className="w-4 h-4" />
             </button>
           </div>
+        </div>
+      )}
+
+      {/* No integrations banner */}
+      {clayConfigured === false && projects.length > 0 && (
+        <div className="bg-gradient-to-r from-cyan-900/20 to-violet-900/20 border border-cyan-500/20 rounded-lg px-5 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-2 text-sm text-gray-300">
+            <Blocks className="w-4 h-4 text-cyan-400" />
+            Connect an integration to push leads directly to your sales tools
+          </div>
+          <Link to="/app/integrations" className="text-xs text-cyan-400 hover:text-cyan-300 font-medium">
+            Set up Integrations
+          </Link>
         </div>
       )}
 
@@ -486,8 +523,8 @@ export default function Leads() {
                               </div>
                             )}
 
-                            {/* Links */}
-                            <div className="flex gap-2 mt-2">
+                            {/* Links + Push to Clay */}
+                            <div className="flex items-center gap-2 mt-2">
                               {lead.linkedin_url && (
                                 <a
                                   href={lead.linkedin_url}
@@ -506,6 +543,22 @@ export default function Leads() {
                               >
                                 GitHub <ExternalLink className="w-3 h-3 ml-1" />
                               </a>
+                              {clayConfigured && !lead.clay_pushed_at && (
+                                <button
+                                  onClick={() => handleSinglePushClay(lead.id)}
+                                  disabled={pushingLeadId === lead.id}
+                                  className="inline-flex items-center gap-1 px-3 py-1 text-sm text-cyan-600 dark:text-cyan-400 hover:bg-cyan-50 dark:hover:bg-cyan-900/20 rounded-lg disabled:opacity-50"
+                                >
+                                  {pushingLeadId === lead.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+                                  Push to Clay
+                                </button>
+                              )}
+                              {lead.clay_pushed_at && (
+                                <span className="inline-flex items-center gap-1 px-2 py-1 text-[11px] text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 rounded-full">
+                                  <Cloud className="w-3 h-3" />
+                                  Pushed to Clay {new Date(lead.clay_pushed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                                </span>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -647,6 +700,32 @@ export default function Leads() {
           })}
         </div>
       )}
+      {/* Push Confirmation Modal */}
+      {showPushConfirm && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-lg max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">Push to Clay</h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+              Push {selectedLeads.size} lead{selectedLeads.size !== 1 ? 's' : ''} to your Clay table? Already-pushed leads will be updated with latest data.
+            </p>
+            <div className="flex items-center gap-3 justify-end">
+              <button
+                onClick={() => setShowPushConfirm(false)}
+                className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmBulkPush}
+                className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-sm inline-flex items-center gap-2"
+              >
+                <Send className="w-4 h-4" /> Push to Clay
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {toast && (
         <Toast
           message={toast.message}

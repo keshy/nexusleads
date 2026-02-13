@@ -5,7 +5,7 @@ import NexusLogo from '../components/NexusLogo'
 import {
   Zap, Shield, Search, Users, Star, GitBranch, ArrowRight, Check,
   ChevronDown, Sparkles, Target, BarChart3, Lock, Globe,
-  Brain, Layers, TrendingUp, ExternalLink
+  Brain, Layers, TrendingUp, ExternalLink, Blocks
 } from 'lucide-react'
 
 /* ─── Matrix Background (dark only, subtle) ─── */
@@ -296,6 +296,7 @@ export default function Landing() {
               { icon: Zap, title: 'Real-Time Jobs', desc: 'Live progress tracking on every sourcing and enrichment job with step-by-step visibility.' },
               { icon: Globe, title: 'Similar Repo Discovery', desc: 'Find related repositories in your space and automatically source their contributor networks.' },
               { icon: Lock, title: 'Self-Hosted Option', desc: 'Deploy on your own infrastructure for complete data control and compliance.' },
+              { icon: Blocks, title: 'Sales Stack Integrations', desc: 'Push enriched leads to Clay, Salesforce, HubSpot, and more. One click from lead to pipeline.' },
             ].map((item) => (
               <div
                 key={item.title}
@@ -304,6 +305,52 @@ export default function Landing() {
                 <item.icon className="w-8 h-8 text-gray-500 group-hover:text-cyan-400 transition-colors mb-4" />
                 <h3 className="text-base font-semibold text-white mb-2">{item.title}</h3>
                 <p className="text-gray-500 text-sm leading-relaxed">{item.desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ═══════ INTEGRATIONS ═══════ */}
+      <section className="relative py-24 sm:py-32 bg-gray-900/50">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6">
+          <div className="text-center mb-16">
+            <span className="text-sm font-medium text-cyan-400 uppercase tracking-wider">Integrations</span>
+            <h2 className="text-3xl sm:text-4xl font-bold mt-3 mb-4">
+              From Insight to <span className="bg-gradient-to-r from-cyan-400 to-violet-400 bg-clip-text text-transparent">Action</span>
+            </h2>
+            <p className="text-gray-400 max-w-2xl mx-auto text-lg">
+              NexusLeads doesn't just find leads — it delivers them where your sellers already work.
+              One click to push enriched, scored, classified leads into your sales stack.
+            </p>
+          </div>
+
+          <div className="flex items-center justify-center gap-3 mb-10">
+            <span className="text-sm text-gray-400">Source</span>
+            <ArrowRight className="w-4 h-4 text-gray-600" />
+            <span className="text-sm text-gray-400">Enrich</span>
+            <ArrowRight className="w-4 h-4 text-gray-600" />
+            <span className="text-sm text-gray-400">Score</span>
+            <ArrowRight className="w-4 h-4 text-cyan-400" />
+            <span className="text-sm font-semibold text-cyan-400">ACT</span>
+          </div>
+
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {[
+              { name: 'Clay', status: 'Live', color: 'border-green-500/40 bg-green-950/20' },
+              { name: 'Salesforce', status: 'Coming Soon', color: 'border-gray-700 bg-gray-900/50' },
+              { name: 'HubSpot', status: 'Coming Soon', color: 'border-gray-700 bg-gray-900/50' },
+              { name: 'Outreach', status: 'Coming Soon', color: 'border-gray-700 bg-gray-900/50' },
+            ].map((item) => (
+              <div key={item.name} className={`rounded-xl border ${item.color} p-5 text-center`}>
+                <div className="text-lg font-semibold text-white mb-1">{item.name}</div>
+                <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                  item.status === 'Live'
+                    ? 'bg-green-500/20 text-green-400'
+                    : 'bg-gray-700/50 text-gray-500'
+                }`}>
+                  {item.status === 'Live' ? '✅ ' : ''}{item.status}
+                </span>
               </div>
             ))}
           </div>

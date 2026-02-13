@@ -1,4 +1,4 @@
-.PHONY: help install setup-dev setup-prod up up-dev down logs clean test lint db-init db-migrate db-reset build
+.PHONY: help install setup-dev setup-prod up up-dev down logs clean test lint db-init db-migrate db-reset build install-git-hooks
 
 # Default target
 help:
@@ -10,6 +10,7 @@ help:
 	@echo "  make up            - Start production services"
 	@echo "  make down          - Stop all services"
 	@echo "  make logs          - View logs"
+	@echo "  make install-git-hooks - Enable pre-commit gitleaks secret scanning"
 	@echo "  make shell-backend - Shell into backend container"
 	@echo "  make shell-jobs    - Shell into jobs container"
 	@echo ""
@@ -190,6 +191,15 @@ install:
 	@echo "Installing frontend dependencies..."
 	cd frontend && npm install
 	@echo "✓ Dependencies installed"
+
+# Install repo-managed git hooks
+install-git-hooks:
+	@chmod +x .githooks/pre-commit
+	@git config core.hooksPath .githooks
+	@echo "✓ Enabled git hooks from .githooks"
+	@if ! command -v gitleaks >/dev/null 2>&1; then \
+		echo "⚠ gitleaks is not installed. Install with: brew install gitleaks"; \
+	fi
 
 # Health checks
 health:

@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+  cat >&2 <<'EOF'
+[pre-commit] gitleaks is required but not installed.
+Install it first, for example:
+  brew install gitleaks
+EOF
+  exit 1
+fi
+
+echo "[pre-commit] Running gitleaks secret scan..."
+
+if gitleaks protect --help >/dev/null 2>&1; then
+  gitleaks protect --staged --redact --no-banner
+  exit $?
+fi
+
+if gitleaks git --help >/dev/null 2>&1; then
+  if gitleaks git --help 2>&1 | grep -q -- '--staged'; then
+    gitleaks git --staged --redact --no-banner
+  else
+    gitleaks git --redact --no-banner
+  fi
+  exit $?
+fi
+
+if gitleaks detect --help >/dev/null 2>&1; then
+  if gitleaks detect --help 2>&1 | grep -q -- '--no-git'; then
+    gitleaks detect --no-git --source . --redact --no-banner --log-level warn
+  else
+    gitleaks detect --source . --redact --no-banner --log-level warn
+  fi
+  exit $?
+fi
+
+echo "[pre-commit] Unsupported gitleaks version. Please update gitleaks." >&2
+exit 1

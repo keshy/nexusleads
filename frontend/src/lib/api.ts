@@ -375,6 +375,16 @@ class ApiClient {
     return response.data
   }
 
+  async purchaseCredits(amount: number) {
+    const response = await this.client.post('/api/billing/purchase', { amount })
+    return response.data
+  }
+
+  async createCheckoutSession(amount: number, successUrl?: string, cancelUrl?: string) {
+    const response = await this.client.post('/api/billing/checkout', { amount, success_url: successUrl, cancel_url: cancelUrl })
+    return response.data
+  }
+
   // Chat conversations
   async getChatConversations() {
     const response = await this.client.get('/api/chat/conversations')

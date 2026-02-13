@@ -1,6 +1,6 @@
 const express = require('express');
 const http = require('http');
-const { attachWebSocketServer } = require('./codex-bridge');
+const { attachWebSocketServer, warmup } = require('./codex-bridge');
 
 const PORT = process.env.PORT || 3001;
 
@@ -12,4 +12,5 @@ attachWebSocketServer(server);
 
 server.listen(PORT, () => {
   console.log(`Assistant service listening on port ${PORT}`);
+  warmup().then(() => console.log('[codex] SDK pre-warmed')).catch(() => {});
 });

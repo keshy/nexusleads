@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../lib/api'
-import { ExternalLink, GitBranch, Play, Tag, Trash2, Users } from 'lucide-react'
+import { ExternalLink, GitBranch, Play, Tag, Trash2, Users, Send, Save } from 'lucide-react'
 import Toast from '../components/Toast'
 import ConfirmDialog from '../components/ConfirmDialog'
 
@@ -12,6 +12,9 @@ interface Project {
   tags?: string[]
   external_urls?: string[]
   sourcing_context?: string
+  auto_export_clay_enabled?: boolean
+  auto_export_clay_min_score?: number
+  auto_export_clay_classifications?: string[]
   stats: {
     total_repositories: number
     total_contributors: number
@@ -50,6 +53,10 @@ export default function ProjectDetail() {
   const [loading, setLoading] = useState(true)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'warning' | 'info' } | null>(null)
+  const [clayEnabled, setClayEnabled] = useState(false)
+  const [clayMinScore, setClayMinScore] = useState('')
+  const [clayClassifications, setClayClassifications] = useState<string[]>([])
+  const [savingClay, setSavingClay] = useState(false)
 
   useEffect(() => {
     if (!projectId) return
@@ -68,6 +75,9 @@ export default function ProjectDetail() {
       setProject(projectData)
       setRepositories(reposData)
       setTopLeads(leadsData || [])
+      setClayEnabled(projectData.auto_export_clay_enabled || false)
+      setClayMinScore(projectData.auto_export_clay_min_score?.toString() || '')
+      setClayClassifications(projectData.auto_export_clay_classifications || [])
     } catch (error) {
       console.error('Error fetching project data:', error)
       setToast({ message: 'Failed to load project details', type: 'error' })
@@ -91,6 +101,29 @@ export default function ProjectDetail() {
     } catch (error: any) {
       setToast({ message: error.response?.data?.detail || 'Failed to trigger sourcing', type: 'error' })
     }
+  }
+
+  const handleSaveClayConfig = async () => {
+    if (!projectId) return
+    setSavingClay(true)
+    try {
+      await api.updateProject(projectId, {
+        auto_export_clay_enabled: clayEnabled,
+        auto_export_clay_min_score: clayMinScore ? parseInt(clayMinScore) : null,
+        auto_export_clay_classifications: clayClassifications.length > 0 ? clayClassifications : null,
+      })
+      setToast({ message: 'Auto-export settings saved', type: 'success' })
+    } catch {
+      setToast({ message: 'Failed to save auto-export settings', type: 'error' })
+    } finally {
+      setSavingClay(false)
+    }
+  }
+
+  const toggleClayClassification = (cls: string) => {
+    setClayClassifications(prev =>
+      prev.includes(cls) ? prev.filter(c => c !== cls) : [...prev, cls]
+    )
   }
 
   const handleDeleteProject = async () => {
@@ -293,6 +326,73 @@ export default function ProjectDetail() {
             ))}
           </div>
         )}
+      </div>
+
+      {/* Auto-Export to Clay */}
+      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+            <Send className="w-5 h-5 text-cyan-500" />
+            Auto-Export to Clay
+          </h2>
+        </div>
+        <p className="text-sm text-gray-500 dark:text-gray-400">
+          Automatically push new leads to Clay after each scan completes.
+        </p>
+        <label className="flex items-center gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={clayEnabled}
+            onChange={(e) => setClayEnabled(e.target.checked)}
+            className="w-4 h-4 rounded border-gray-300 text-cyan-600 focus:ring-cyan-500"
+          />
+          <span className="text-sm text-gray-700 dark:text-gray-300">Enable auto-export after sourcing</span>
+        </label>
+        {clayEnabled && (
+          <div className="space-y-3 pl-7">
+            <div>
+              <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">Minimum score (0–100)</label>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                value={clayMinScore}
+                onChange={(e) => setClayMinScore(e.target.value)}
+                placeholder="e.g. 60"
+                className="w-32 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">Classifications to export</label>
+              <div className="flex flex-wrap gap-2">
+                {['DECISION_MAKER', 'KEY_CONTRIBUTOR', 'HIGH_IMPACT'].map(cls => (
+                  <button
+                    key={cls}
+                    onClick={() => toggleClayClassification(cls)}
+                    className={`px-3 py-1 text-xs rounded-full border transition-colors ${
+                      clayClassifications.includes(cls)
+                        ? 'bg-cyan-100 dark:bg-cyan-900/40 border-cyan-400 text-cyan-700 dark:text-cyan-300'
+                        : 'bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400'
+                    }`}
+                  >
+                    {cls.replace(/_/g, ' ')}
+                  </button>
+                ))}
+              </div>
+              {clayClassifications.length === 0 && (
+                <p className="text-xs text-gray-400 mt-1">No filter — all classifications will be exported</p>
+              )}
+            </div>
+          </div>
+        )}
+        <button
+          onClick={handleSaveClayConfig}
+          disabled={savingClay}
+          className="inline-flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-white rounded-lg text-sm disabled:opacity-60"
+        >
+          <Save className="w-4 h-4" />
+          {savingClay ? 'Saving...' : 'Save Auto-Export Settings'}
+        </button>
       </div>
 
       <div className="space-y-4">

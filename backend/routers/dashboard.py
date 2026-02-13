@@ -251,7 +251,7 @@ async def get_top_leads(
     leads = []
     for lead_score, contributor, social_context, project_name in results:
         lead = {
-            "id": str(contributor.id),
+            "id": str(lead_score.id),
             "username": contributor.username,
             "full_name": contributor.full_name,
             "company": contributor.company,
