@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "plg-sourcer-launcher"
+version = "0.1.0"
+description = "Single-command launcher for PLG Lead Sourcer."
+requires-python = ">=3.10"
+dependencies = [
+  "python-dotenv>=1.0.0",
+  "psycopg2-binary>=2.9.9",
+  "uvicorn[standard]>=0.27.0",
+]
+
+[project.scripts]
+plg_sourcer = "plg_sourcer:main"
+
+[tool.setuptools]
+py-modules = ["plg_sourcer"]

@@ -1,5 +1,8 @@
 """Main FastAPI application."""
-from fastapi import FastAPI
+import os
+from pathlib import Path
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from config import settings as app_settings
 from routers import auth, projects, repositories, contributors, jobs, dashboard, users, settings as settings_router, organizations, integrations, billing, chat
@@ -11,7 +14,8 @@ app = FastAPI(
     description="Enterprise-grade PLG lead sourcing application",
     docs_url="/docs",
     redoc_url="/redoc",
-    redirect_slashes=False,
+    # Accept both trailing-slash and non-trailing-slash paths.
+    redirect_slashes=True,
 )
 
 # Configure CORS
@@ -39,9 +43,36 @@ app.include_router(billing.router, prefix="/api/billing", tags=["Billing"])
 app.include_router(chat.router, prefix="/api/chat", tags=["Chat"])
 
 
+def _resolve_frontend_index() -> Path | None:
+    """Resolve frontend index file path when static UI serving is enabled."""
+    serve_frontend = os.getenv("SERVE_FRONTEND", "").lower() in {"1", "true", "yes"}
+    if not serve_frontend:
+        return None
+
+    frontend_dist = os.getenv("FRONTEND_DIST", "").strip()
+    if not frontend_dist:
+        return None
+
+    dist_path = Path(frontend_dist).expanduser()
+    if not dist_path.is_absolute():
+        dist_path = (Path(__file__).resolve().parent.parent / dist_path).resolve()
+
+    index_path = dist_path / "index.html"
+    if not index_path.exists():
+        return None
+    return index_path
+
+
+FRONTEND_INDEX = _resolve_frontend_index()
+FRONTEND_DIST = FRONTEND_INDEX.parent if FRONTEND_INDEX else None
+
+
 @app.get("/")
 async def root():
     """Root endpoint."""
+    if FRONTEND_INDEX:
+        return FileResponse(FRONTEND_INDEX)
+
     return {
         "name": app_settings.APP_NAME,
         "version": app_settings.APP_VERSION,
@@ -53,6 +84,26 @@ async def root():
 async def health_check():
     """Health check endpoint."""
     return {"status": "healthy"}
+
+
+def _configure_frontend_static(app: FastAPI) -> None:
+    """Serve frontend static build when explicitly enabled."""
+    if not FRONTEND_INDEX or not FRONTEND_DIST:
+        return
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def frontend_files(full_path: str):
+        # Preserve API/docs/health routes, only handle SPA UI paths.
+        if full_path.startswith(("api/", "docs", "redoc", "openapi.json", "health")):
+            raise HTTPException(status_code=404, detail="Not Found")
+
+        requested = (FRONTEND_DIST / full_path).resolve()
+        if requested.is_file() and str(requested).startswith(str(FRONTEND_DIST)):
+            return FileResponse(requested)
+        return FileResponse(FRONTEND_INDEX)
+
+
+_configure_frontend_static(app)
 
 
 if __name__ == "__main__":

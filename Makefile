@@ -1,4 +1,4 @@
-.PHONY: help install setup-dev setup-prod up up-dev up-dev-assistant-docker assistant-local down logs clean test lint db-init db-migrate db-reset build install-git-hooks
+.PHONY: help install install-launcher run-launcher build-binary setup-dev setup-prod up up-dev up-dev-assistant-docker assistant-local down logs clean test lint db-init db-migrate db-reset build install-git-hooks
 
 # Default target
 help:
@@ -9,6 +9,9 @@ help:
 	@echo "  make up-dev        - Start development services"
 	@echo "  make up-dev-assistant-docker - Start dev services with assistant in Docker"
 	@echo "  make assistant-local - Run assistant on host (recommended on macOS)"
+	@echo "  make install-launcher - Install plg_sourcer Python launcher"
+	@echo "  make run-launcher CREDS=.env - Run backend without Docker (WITH_UI=1, WITH_ASSISTANT=1 optional)"
+	@echo "  make build-binary  - Build distributable single-file plg_sourcer binary"
 	@echo "  make up            - Start production services"
 	@echo "  make down          - Stop all services"
 	@echo "  make logs          - View logs"
@@ -206,6 +209,34 @@ install:
 	@echo "Installing frontend dependencies..."
 	cd frontend && npm install
 	@echo "✓ Dependencies installed"
+
+# Install Python launcher (non-Docker runtime path)
+install-launcher:
+	@echo "Installing backend dependencies..."
+	python3 -m pip install -r backend/requirements.txt
+	@echo "Installing launcher package..."
+	python3 -m pip install -e .
+	@echo "✓ Launcher installed: plg_sourcer"
+
+# Run launcher with credentials file
+run-launcher:
+	@if [ -z "$(CREDS)" ]; then \
+		echo "Usage: make run-launcher CREDS=/path/to/credentials.env [FULL_STACK=1] [WITH_JOBS=1] [WITH_UI=1] [BUILD_UI=1] [WITH_ASSISTANT=1] [ASSISTANT_PORT=3001]"; \
+		exit 1; \
+	fi
+	@cmd='plg_sourcer -f "$(CREDS)"'; \
+	if [ "$(FULL_STACK)" = "1" ]; then cmd="$$cmd --full-stack"; fi; \
+	if [ "$(WITH_JOBS)" = "1" ]; then cmd="$$cmd --with-jobs"; fi; \
+	if [ "$(WITH_UI)" = "1" ]; then cmd="$$cmd --with-ui"; fi; \
+	if [ "$(BUILD_UI)" = "1" ]; then cmd="$$cmd --build-ui"; fi; \
+	if [ "$(WITH_ASSISTANT)" = "1" ]; then cmd="$$cmd --with-assistant"; fi; \
+	if [ -n "$(ASSISTANT_PORT)" ]; then cmd="$$cmd --assistant-port $(ASSISTANT_PORT)"; fi; \
+	echo "Running: $$cmd"; \
+	eval "$$cmd"
+
+# Build single-file binary distribution
+build-binary:
+	./scripts/build_binary.sh
 
 # Install repo-managed git hooks
 install-git-hooks:

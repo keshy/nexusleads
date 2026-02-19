@@ -39,14 +39,9 @@ This workflow assumes two worktrees with different identities and push targets.
    - `git commit -m "Your message"`
 4. Push private.
    - `git push`
-5. Bring changes into OSS worktree.
-   - `git fetch origin-private`
-   - `git merge origin-private/main`
-6. Confirm no private-only content is present, then commit in OSS worktree if needed.
-   - `git add -A`
-   - `git commit -m "Your message"`
-7. Push OSS.
-   - `git push`
+5. Push OSS (both branches).
+   - `git push origin-oss main:main`
+   - `git push origin-oss main:oss-main`
 
 ## If You Prefer Syncing by Branch Name
 
@@ -69,8 +64,9 @@ This workflow assumes two worktrees with different identities and push targets.
 
 ## Optional Convenience
 
-1. Push both from the private worktree.
+1. Push all from the private worktree.
    - `git push origin-private main`
-   - `git push origin-oss oss-main`
+   - `git push origin-oss main:main`
+   - `git push origin-oss main:oss-main`
 2. Add aliases.
-   - `git config alias.pushboth "!git push origin-private main && git push origin-oss oss-main"`
+   - `git config alias.pushall "!git push origin-private main && git push origin-oss main:main && git push origin-oss main:oss-main"`

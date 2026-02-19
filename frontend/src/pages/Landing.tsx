@@ -363,10 +363,10 @@ export default function Landing() {
           <div className="text-center mb-16">
             <span className="text-sm font-medium text-green-400 uppercase tracking-wider">Pricing</span>
             <h2 className="text-3xl sm:text-4xl font-bold mt-3 mb-4">
-              Start Free, Scale as You Grow
+              Pay As You Go Pricing
             </h2>
             <p className="text-gray-400 max-w-xl mx-auto text-lg">
-              No credit card required. Upgrade when you need more power.
+              Start free, then pay only for completed enrichment searches. Managed keys: $0.05/search. BYOK: $0.02/search.
             </p>
           </div>
 
@@ -379,7 +379,7 @@ export default function Landing() {
               </div>
               <div className="mb-6">
                 <span className="text-4xl font-bold text-white">$0</span>
-                <span className="text-gray-500 text-sm ml-1">/month</span>
+                <span className="text-gray-500 text-sm ml-1">/forever</span>
               </div>
               <ul className="space-y-3 mb-8 flex-1">
                 {[
@@ -411,18 +411,18 @@ export default function Landing() {
                 Most Popular
               </div>
               <div className="mb-6">
-                <h3 className="text-lg font-semibold text-white">Pro</h3>
-                <p className="text-gray-500 text-sm mt-1">For growing teams with serious pipeline goals</p>
+                <h3 className="text-lg font-semibold text-white">Pay As You Go</h3>
+                <p className="text-gray-500 text-sm mt-1">For teams scaling outbound without monthly commitments</p>
               </div>
               <div className="mb-6">
-                <span className="text-4xl font-bold text-white">$79</span>
-                <span className="text-gray-500 text-sm ml-1">/month</span>
+                <span className="text-4xl font-bold text-white">$0.05</span>
+                <span className="text-gray-500 text-sm ml-1">/search</span>
               </div>
               <ul className="space-y-3 mb-8 flex-1">
                 {[
-                  'Unlimited projects',
-                  'Unlimited repositories',
-                  '1,000 enrichment searches / month',
+                  'No monthly subscription',
+                  'Billed only for completed enrichment searches',
+                  'Unlimited projects and repositories',
                   'Everything in Starter',
                   'LinkedIn deep enrichment',
                   'Multiple enrichment sources',
@@ -440,7 +440,7 @@ export default function Landing() {
                 onClick={() => navigate('/login')}
                 className="w-full py-3 rounded-xl bg-gradient-to-r from-cyan-600 to-violet-600 hover:from-cyan-500 hover:to-violet-500 text-white font-medium transition-all shadow-lg shadow-cyan-500/20"
               >
-                Start Pro Trial
+                Start Pay As You Go
               </button>
             </div>
 

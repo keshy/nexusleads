@@ -218,6 +218,50 @@ alembic upgrade head
 docker-compose up -d
 ```
 
+### Python Launcher (No Docker)
+
+Install and run with a single command:
+
+```bash
+python3 -m pip install -r backend/requirements.txt
+python3 -m pip install -e .
+plg_sourcer -f /path/to/credentials.env
+```
+
+Include jobs worker:
+
+```bash
+plg_sourcer -f /path/to/credentials.env --with-jobs
+```
+
+Include UI from the same process:
+
+```bash
+plg_sourcer -f /path/to/credentials.env --with-ui --build-ui
+```
+
+Include assistant websocket service:
+
+```bash
+plg_sourcer -f /path/to/credentials.env --with-assistant
+```
+
+Run full stack in one command:
+
+```bash
+plg_sourcer -f /path/to/credentials.env --full-stack --build-ui
+```
+
+The launcher automatically initializes an empty database and applies SQL migrations at startup.
+
+Build a distributable binary:
+
+```bash
+make build-binary
+```
+
+Full guide: `docs/python-launcher-deploy.md`
+
 ## Roadmap
 
 - [ ] SAML/SSO authentication
