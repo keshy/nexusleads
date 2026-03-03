@@ -296,6 +296,9 @@ MIGRATIONS=(
   database/migrations/006_add_clay_push_log.sql
   database/migrations/007_add_chat_conversations.sql
   database/migrations/008_align_billing_schema.sql
+  database/migrations/009_align_org_schema.sql
+  database/migrations/010_community_generalization.sql
+  database/migrations/011_nullable_github_fields.sql
 )
 
 for f in "${MIGRATIONS[@]}"; do
