@@ -233,6 +233,21 @@ class AppSetting(Base):
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class ClayPushLog(Base):
+    """Track which leads have been pushed to Clay."""
+    __tablename__ = "clay_push_log"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    job_id = Column(UUID(as_uuid=True), ForeignKey("sourcing_jobs.id", ondelete="CASCADE"), nullable=False)
+    member_id = Column(UUID(as_uuid=True), ForeignKey("members.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    status = Column(String(50), nullable=False)  # 'success', 'failed', 'skipped'
+    error_message = Column(Text)
+    clay_response_status = Column(Integer)
+    pushed_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
 class JobProgress(Base):
     """Job progress tracking."""
     __tablename__ = "job_progress"
