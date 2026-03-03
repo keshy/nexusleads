@@ -1,5 +1,6 @@
 """Background job processor."""
 import logging
+import random
 import time
 import asyncio
 from datetime import datetime
@@ -24,6 +25,10 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+# Max members to enrich per scan — random sample for broader coverage across runs
+ENRICHMENT_SAMPLE_SIZE = 100
 
 
 class JobCancelledError(Exception):
@@ -474,10 +479,16 @@ class JobProcessor:
                     CommunityMember.source_id == repository.id
                 ).all()
 
+                unenriched = [cm for cm in source_members if cm.member_id not in enriched_ids]
+                # Random sample for broader coverage across multiple scans
+                if len(unenriched) > ENRICHMENT_SAMPLE_SIZE:
+                    sample = random.sample(unenriched, ENRICHMENT_SAMPLE_SIZE)
+                    logger.info(f"Sampling {ENRICHMENT_SAMPLE_SIZE} of {len(unenriched)} unenriched members for enrichment")
+                else:
+                    sample = unenriched
+
                 enrich_count = 0
-                for cm in source_members:
-                    if cm.member_id in enriched_ids:
-                        continue
+                for cm in sample:
                     enrich_job = SourcingJob(
                         project_id=repository.project_id,
                         source_id=repository.id,
@@ -490,9 +501,11 @@ class JobProcessor:
                     enrich_count += 1
 
                 db.commit()
+                already_enriched = len(source_members) - len(unenriched)
+                remaining = len(unenriched) - enrich_count
                 self.update_progress_step(
                     db, step4, 'completed',
-                    f"Queued enrichment for {enrich_count} members ({len(source_members) - enrich_count} already enriched)"
+                    f"Queued enrichment for {enrich_count} members ({already_enriched} already enriched, {remaining} remaining for next scan)"
                 )
                 logger.info(f"Queued {enrich_count} enrichment jobs for source {repository.full_name}")
             except Exception as e:
@@ -847,10 +860,16 @@ class JobProcessor:
                     CommunityMember.source_id == repository.id
                 ).all()
 
+                unenriched = [cm for cm in source_members if cm.member_id not in enriched_ids]
+                # Random sample for broader coverage across multiple scans
+                if len(unenriched) > ENRICHMENT_SAMPLE_SIZE:
+                    sample = random.sample(unenriched, ENRICHMENT_SAMPLE_SIZE)
+                    logger.info(f"Sampling {ENRICHMENT_SAMPLE_SIZE} of {len(unenriched)} unenriched stargazers for enrichment")
+                else:
+                    sample = unenriched
+
                 enrich_count = 0
-                for cm in source_members:
-                    if cm.member_id in enriched_ids:
-                        continue
+                for cm in sample:
                     enrich_job = SourcingJob(
                         project_id=repository.project_id,
                         source_id=repository.id,
@@ -862,10 +881,11 @@ class JobProcessor:
                     db.add(enrich_job)
                     enrich_count += 1
 
+                remaining = len(unenriched) - enrich_count
                 db.commit()
                 self.update_progress_step(
                     db, step3, 'completed',
-                    f"Queued enrichment for {enrich_count} stargazers"
+                    f"Queued enrichment for {enrich_count} stargazers ({remaining} remaining for next scan)"
                 )
                 logger.info(f"Queued {enrich_count} enrichment jobs for stargazers of {repository.full_name}")
             except Exception as e:
@@ -1080,15 +1100,20 @@ class JobProcessor:
             source.last_sourced_at = datetime.utcnow()
             db.commit()
 
-            # Queue enrichment for new members
+            # Queue enrichment for new members (random sample for broader coverage)
             enriched_ids = {sc.member_id for sc in db.query(SocialContext.member_id).all()}
             source_members = db.query(CommunityMember).filter(
                 CommunityMember.source_id == source.id
             ).all()
+            unenriched = [cm for cm in source_members if cm.member_id not in enriched_ids]
+            if len(unenriched) > ENRICHMENT_SAMPLE_SIZE:
+                sample = random.sample(unenriched, ENRICHMENT_SAMPLE_SIZE)
+                logger.info(f"Sampling {ENRICHMENT_SAMPLE_SIZE} of {len(unenriched)} unenriched members for enrichment")
+            else:
+                sample = unenriched
+
             enrich_count = 0
-            for cm in source_members:
-                if cm.member_id in enriched_ids:
-                    continue
+            for cm in sample:
                 enrich_job = SourcingJob(
                     project_id=source.project_id,
                     source_id=source.id,
@@ -1099,8 +1124,9 @@ class JobProcessor:
                 )
                 db.add(enrich_job)
                 enrich_count += 1
+            remaining = len(unenriched) - enrich_count
             db.commit()
-            logger.info(f"Queued {enrich_count} enrichment jobs for source {source.full_name}")
+            logger.info(f"Queued {enrich_count} enrichment jobs for source {source.full_name} ({remaining} remaining for next scan)")
 
             # Finalize
             job.status = 'completed'
