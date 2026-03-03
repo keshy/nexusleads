@@ -115,6 +115,7 @@ services:
     environment:
       VITE_API_URL: http://localhost:8000
       VITE_CODEX_WS_URL: ${VITE_CODEX_WS_URL:-ws://localhost:3001/ws/codex}
+      VITE_FEATURE_BILLING: ${VITE_FEATURE_BILLING:-false}
     ports:
       - "5173:5173"
     depends_on:

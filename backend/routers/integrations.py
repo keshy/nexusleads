@@ -86,7 +86,7 @@ async def get_clay_activity(
     return [
         {
             "id": str(log.id),
-            "contributor_id": str(log.contributor_id),
+            "member_id": str(log.member_id),
             "project_id": str(log.project_id) if log.project_id else None,
             "status": log.status,
             "pushed_at": log.pushed_at.isoformat() if log.pushed_at else None,

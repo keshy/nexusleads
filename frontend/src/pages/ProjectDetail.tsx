@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../lib/api'
-import { ExternalLink, GitBranch, Play, Tag, Trash2, Users, Send, Save } from 'lucide-react'
+import { ExternalLink, Globe, Play, Tag, Trash2, Users, Send, Save } from 'lucide-react'
 import Toast from '../components/Toast'
 import ConfirmDialog from '../components/ConfirmDialog'
 
@@ -16,19 +16,24 @@ interface Project {
   auto_export_clay_min_score?: number
   auto_export_clay_classifications?: string[]
   stats: {
-    total_repositories: number
-    total_contributors: number
+    total_sources: number
+    total_members: number
     qualified_leads: number
     active_jobs: number
+    // backward compat
+    total_repositories?: number
+    total_contributors?: number
   }
 }
 
-interface Repository {
+interface Source {
   id: string
-  github_url: string
+  source_type: string
+  external_url?: string
+  github_url?: string
   full_name: string
-  repo_name: string
-  owner: string
+  repo_name?: string
+  owner?: string
   sourcing_interval: string
   last_sourced_at?: string
 }
@@ -48,7 +53,7 @@ export default function ProjectDetail() {
   const { projectId } = useParams()
   const navigate = useNavigate()
   const [project, setProject] = useState<Project | null>(null)
-  const [repositories, setRepositories] = useState<Repository[]>([])
+  const [sources, setSources] = useState<Source[]>([])
   const [topLeads, setTopLeads] = useState<Lead[]>([])
   const [loading, setLoading] = useState(true)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
@@ -67,13 +72,13 @@ export default function ProjectDetail() {
     if (!projectId) return
     try {
       setLoading(true)
-      const [projectData, reposData, leadsData] = await Promise.all([
+      const [projectData, sourcesData, leadsData] = await Promise.all([
         api.getProject(projectId),
-        api.getRepositories(projectId),
+        api.getSources(projectId),
         api.getTopLeads(projectId)
       ])
       setProject(projectData)
-      setRepositories(reposData)
+      setSources(sourcesData)
       setTopLeads(leadsData || [])
       setClayEnabled(projectData.auto_export_clay_enabled || false)
       setClayMinScore(projectData.auto_export_clay_min_score?.toString() || '')
@@ -90,12 +95,13 @@ export default function ProjectDetail() {
     if (!projectId) return
     try {
       const result = await api.triggerProjectSourcing(projectId)
+      const totalSources = result.total_sources || result.total_repositories || 0
       if (result.jobs_created === 0) {
-        setToast({ message: `All ${result.total_repositories} repositories are already being sourced.`, type: 'info' })
-      } else if (result.jobs_created === result.total_repositories) {
-        setToast({ message: `Started sourcing ${result.jobs_created} repositories!`, type: 'success' })
+        setToast({ message: `All ${totalSources} sources are already being scanned.`, type: 'info' })
+      } else if (result.jobs_created === totalSources) {
+        setToast({ message: `Started scanning ${result.jobs_created} sources!`, type: 'success' })
       } else {
-        setToast({ message: `Started sourcing ${result.jobs_created} of ${result.total_repositories} repositories.`, type: 'info' })
+        setToast({ message: `Scanning ${result.jobs_created} of ${totalSources} sources.`, type: 'info' })
       }
       fetchData()
     } catch (error: any) {
@@ -139,20 +145,20 @@ export default function ProjectDetail() {
   const handleTriggerSourcing = async (repoId: string) => {
     try {
       await api.triggerSourcing(repoId)
-      setToast({ message: 'Sourcing job started! Check Jobs for progress.', type: 'success' })
+      setToast({ message: 'Scan started! Check Jobs for progress.', type: 'success' })
       fetchData()
     } catch (error: any) {
-      setToast({ message: error.response?.data?.detail || 'Failed to start sourcing', type: 'error' })
+      setToast({ message: error.response?.data?.detail || 'Failed to start scan', type: 'error' })
     }
   }
 
-  const handleDeleteRepo = async (repoId: string) => {
+  const handleDeleteSource = async (sourceId: string) => {
     try {
-      await api.deleteRepository(repoId)
-      setToast({ message: 'Repository deleted successfully', type: 'success' })
+      await api.deleteSource(sourceId)
+      setToast({ message: 'Source deleted successfully', type: 'success' })
       fetchData()
     } catch (error) {
-      setToast({ message: 'Failed to delete repository', type: 'error' })
+      setToast({ message: 'Failed to delete source', type: 'error' })
     }
   }
 
@@ -193,7 +199,7 @@ export default function ProjectDetail() {
             className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg inline-flex items-center"
           >
             <Play className="w-4 h-4 mr-2" />
-            Source All
+            Scan All
           </button>
           {!showDeleteConfirm && (
             <button
@@ -209,7 +215,7 @@ export default function ProjectDetail() {
       {showDeleteConfirm && (
         <ConfirmDialog
           title="Delete Project"
-          message="Are you sure you want to delete this project? This will also delete all associated repositories and data."
+          message="Are you sure you want to delete this project? This will also delete all associated sources and data."
           onConfirm={handleDeleteProject}
           onCancel={() => setShowDeleteConfirm(false)}
           confirmText="Yes, Delete Project"
@@ -256,70 +262,76 @@ export default function ProjectDetail() {
       )}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
-          <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">{project.stats.total_repositories}</div>
-          <div className="text-xs text-gray-500 dark:text-gray-400">Repositories</div>
+        <div className="relative overflow-hidden bg-white dark:bg-gray-800 rounded-xl border border-gray-200/80 dark:border-gray-700/80 p-4 text-center">
+          <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-transparent dark:from-white/[0.03] pointer-events-none" />
+          <div className="relative">
+            <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">{project.stats.total_sources ?? project.stats.total_repositories ?? 0}</div>
+            <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">Sources</div>
+          </div>
         </div>
-        <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
-          <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">{project.stats.total_contributors}</div>
-          <div className="text-xs text-gray-500 dark:text-gray-400">Contributors</div>
+        <div className="relative overflow-hidden bg-white dark:bg-gray-800 rounded-xl border border-gray-200/80 dark:border-gray-700/80 p-4 text-center">
+          <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-transparent dark:from-white/[0.03] pointer-events-none" />
+          <div className="relative">
+            <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">{project.stats.total_members ?? project.stats.total_contributors ?? 0}</div>
+            <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">Members</div>
+          </div>
         </div>
-        <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
-          <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">{project.stats.qualified_leads}</div>
-          <div className="text-xs text-gray-500 dark:text-gray-400">Qualified Leads</div>
+        <div className="relative overflow-hidden bg-white dark:bg-gray-800 rounded-xl border border-gray-200/80 dark:border-gray-700/80 p-4 text-center">
+          <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-transparent dark:from-white/[0.03] pointer-events-none" />
+          <div className="relative">
+            <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">{project.stats.qualified_leads}</div>
+            <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">Qualified Leads</div>
+          </div>
         </div>
-        <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
-          <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">{project.stats.active_jobs}</div>
-          <div className="text-xs text-gray-500 dark:text-gray-400">Active Jobs</div>
+        <div className="relative overflow-hidden bg-white dark:bg-gray-800 rounded-xl border border-gray-200/80 dark:border-gray-700/80 p-4 text-center">
+          <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-transparent dark:from-white/[0.03] pointer-events-none" />
+          <div className="relative">
+            <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">{project.stats.active_jobs}</div>
+            <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">Active Jobs</div>
+          </div>
         </div>
       </div>
 
       <div className="space-y-4">
-        <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Repositories</h2>
-        {repositories.length === 0 ? (
-          <div className="text-gray-600 dark:text-gray-400">No repositories added yet.</div>
+        <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Community Sources</h2>
+        {sources.length === 0 ? (
+          <div className="text-gray-600 dark:text-gray-400">No sources added yet.</div>
         ) : (
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {repositories.map((repo) => (
-              <div key={repo.id} className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+            {sources.map((src) => (
+              <div key={src.id} className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
                 <div className="flex items-start justify-between mb-3">
                   <div>
-                    <h3 className="font-semibold text-gray-900 dark:text-gray-100">{repo.repo_name}</h3>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">{repo.owner}</p>
+                    <h3 className="font-semibold text-gray-900 dark:text-gray-100">{src.full_name}</h3>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">{src.source_type}</p>
                   </div>
                   <button
-                    onClick={() => handleDeleteRepo(repo.id)}
+                    onClick={() => handleDeleteSource(src.id)}
                     className="p-1 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
-                    title="Delete repository"
+                    title="Delete source"
                   >
                     <Trash2 className="w-4 h-4 text-red-600 dark:text-red-400" />
                   </button>
                 </div>
                 <div className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
-                  <div className="flex items-center">
-                    <GitBranch className="w-4 h-4 mr-2" />
-                    {repo.full_name}
-                  </div>
-                  {repo.last_sourced_at && (
-                    <div>Last sourced: {new Date(repo.last_sourced_at).toLocaleDateString()}</div>
+                  {src.external_url && (
+                    <a href={src.external_url} target="_blank" rel="noopener noreferrer" className="flex items-center text-primary hover:underline">
+                      <Globe className="w-4 h-4 mr-2" />
+                      {src.external_url.replace(/^https?:\/\//, '')}
+                    </a>
                   )}
-                  <div>Sourcing: {repo.sourcing_interval}</div>
+                  {src.last_sourced_at && (
+                    <div>Last scanned: {new Date(src.last_sourced_at).toLocaleDateString()}</div>
+                  )}
+                  <div>Scan: {src.sourcing_interval}</div>
                 </div>
-                <div className="flex items-center justify-between mt-4">
-                  <a
-                    href={repo.github_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm text-primary hover:underline inline-flex items-center"
-                  >
-                    View GitHub <ExternalLink className="w-3 h-3 ml-1" />
-                  </a>
+                <div className="flex items-center justify-end mt-4">
                   <button
-                    onClick={() => handleTriggerSourcing(repo.id)}
+                    onClick={() => handleTriggerSourcing(src.id)}
                     className="px-3 py-1 bg-primary hover:bg-primary/90 text-white rounded-lg inline-flex items-center text-sm"
                   >
                     <Play className="w-3 h-3 mr-1" />
-                    Source
+                    Run Scan
                   </button>
                 </div>
               </div>
@@ -416,7 +428,7 @@ export default function ProjectDetail() {
                     {lead.full_name || lead.username}
                   </p>
                   <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                    {lead.current_position || lead.current_company || 'Contributor'}
+                    {lead.current_position || lead.current_company || 'Member'}
                   </p>
                 </div>
                 {lead.overall_score !== undefined && (

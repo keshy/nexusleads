@@ -3,6 +3,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { User, Users, UserPlus, Trash2, Shield, Mail, Calendar, Save, Key, Eye, EyeOff, CheckCircle, XCircle, RotateCcw, HelpCircle, ExternalLink, AlertTriangle, Info, Lock, CreditCard, ArrowUpRight, ArrowDownRight, Loader2, RefreshCw, Plus, DollarSign } from 'lucide-react'
 import { api } from '../lib/api'
 import Toast from '../components/Toast'
+import { FEATURE_BILLING } from '../lib/featureFlags'
 
 interface UserData {
   id: string
@@ -82,7 +83,7 @@ export default function Settings() {
     if (activeTab === 'apikeys') {
       fetchSettings()
     }
-    if (activeTab === 'billing') {
+    if (FEATURE_BILLING && activeTab === 'billing') {
       fetchBilling()
     }
   }, [user, activeTab])
@@ -281,7 +282,6 @@ export default function Settings() {
   }
 
   const settingGroups: { label: string; keys: string[] }[] = [
-    { label: 'GitHub', keys: ['GITHUB_TOKEN'] },
     { label: 'Azure OpenAI', keys: ['AZURE_OPENAI_ENDPOINT', 'AZURE_OPENAI_API_KEY', 'AZURE_OPENAI_DEPLOYMENT', 'AZURE_OPENAI_API_VERSION'] },
     { label: 'OpenAI (Non-Azure)', keys: ['OPENAI_API_KEY', 'OPENAI_MODEL'] },
     { label: 'Web Search', keys: ['SERPER_API_KEY'] },
@@ -340,19 +340,21 @@ export default function Settings() {
               </div>
             </button>
           )}
-          <button
-            onClick={() => setActiveTab('billing')}
-            className={`py-4 px-1 border-b-2 font-medium text-sm ${
-              activeTab === 'billing'
-                ? 'border-primary text-primary dark:text-primary'
-                : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
-            }`}
-          >
-            <div className="flex items-center space-x-2">
-              <CreditCard className="w-5 h-5" />
-              <span>Billing</span>
-            </div>
-          </button>
+          {FEATURE_BILLING && (
+            <button
+              onClick={() => setActiveTab('billing')}
+              className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                activeTab === 'billing'
+                  ? 'border-primary text-primary dark:text-primary'
+                  : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
+              }`}
+            >
+              <div className="flex items-center space-x-2">
+                <CreditCard className="w-5 h-5" />
+                <span>Billing</span>
+              </div>
+            </button>
+          )}
         </nav>
       </div>
 
@@ -496,7 +498,7 @@ export default function Settings() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-600 dark:text-gray-400">
-                Configure API keys and service credentials. Values stored here take priority over environment variables.
+                Configure AI and enrichment service credentials. Source connector keys (GitHub, Discord, etc.) are managed in <a href="/app/integrations" className="text-primary hover:underline">Integrations</a>.
               </p>
             </div>
             <button
@@ -853,7 +855,7 @@ export default function Settings() {
       )}
 
       {/* Billing Tab */}
-      {activeTab === 'billing' && (
+      {FEATURE_BILLING && activeTab === 'billing' && (
         <div className="max-w-3xl space-y-6">
           {billingLoading ? (
             <div className="flex items-center justify-center h-40">

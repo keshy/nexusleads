@@ -5,7 +5,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from config import settings as app_settings
-from routers import auth, projects, repositories, contributors, jobs, dashboard, users, settings as settings_router, organizations, integrations, billing, chat
+from routers import auth, projects, sources, members, jobs, dashboard, users, settings as settings_router, organizations, integrations, billing, chat
 
 # Create FastAPI app
 app = FastAPI(
@@ -31,9 +31,12 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(users.router, prefix="/api/users", tags=["Users"])
 app.include_router(projects.router, prefix="/api/projects", tags=["Projects"])
-app.include_router(repositories.router, prefix="/api/repositories", tags=["Repositories"])
-app.include_router(contributors.router, prefix="/api/contributors", tags=["Contributors"])
-app.include_router(contributors.router, prefix="/api/leads", tags=["Leads"])
+app.include_router(sources.router, prefix="/api/sources", tags=["Sources"])
+app.include_router(members.router, prefix="/api/members", tags=["Members"])
+app.include_router(members.router, prefix="/api/leads", tags=["Leads"])
+# Backward-compat aliases for old route prefixes
+app.include_router(sources.router, prefix="/api/repositories", tags=["Repositories (compat)"], include_in_schema=False)
+app.include_router(members.router, prefix="/api/contributors", tags=["Contributors (compat)"], include_in_schema=False)
 app.include_router(jobs.router, prefix="/api/jobs", tags=["Jobs"])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"])
 app.include_router(settings_router.router, prefix="/api/settings", tags=["Settings"])

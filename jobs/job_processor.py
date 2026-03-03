@@ -12,9 +12,9 @@ from services.github_service import GitHubService
 from services.enrichment_service import EnrichmentService
 from services.scoring_service import ScoringService
 from models import (
-    SourcingJob, JobProgress, Repository, Contributor,
-    ContributorStats, SocialContext, LeadScore,
-    RepositoryContributor, OrgMember
+    SourcingJob, JobProgress, CommunitySource, Member,
+    MemberActivity, SocialContext, LeadScore,
+    CommunityMember, OrgMember, Project
 )
 import billing_service
 
@@ -39,9 +39,23 @@ class JobProcessor:
         self.running_jobs = set()
 
     def _init_services(self, db: Session, user_id=None):
-        """Re-initialize services reading latest settings from DB."""
-        self.github_service = GitHubService(db=db, user_id=user_id)
+        """Re-initialize services reading latest settings from DB.
+
+        GitHub service is lazily initialized — it is only created when a
+        GitHub-specific job actually needs it, so a missing token won't
+        crash unrelated jobs.
+        """
+        self._db = db
+        self._user_id = user_id
+        self._github_service = None
         self.enrichment_service = EnrichmentService(db=db, user_id=user_id)
+
+    @property
+    def github_service(self) -> GitHubService:
+        """Lazy-init GitHub service; raises ValueError if token missing."""
+        if self._github_service is None:
+            self._github_service = GitHubService(db=self._db, user_id=self._user_id)
+        return self._github_service
     
     def claim_pending_jobs(self, db: Session) -> List[SourcingJob]:
         """Claim pending jobs for processing with row-level locking."""
@@ -153,7 +167,7 @@ class JobProcessor:
             "is_maintainer": stats_data.get("is_maintainer", False)
         }
 
-    def aggregate_stats(self, stats_rows: List[ContributorStats]) -> dict:
+    def aggregate_stats(self, stats_rows: List[MemberActivity]) -> dict:
         """Aggregate contributor stats across repositories."""
         if not stats_rows:
             return {}
@@ -181,12 +195,12 @@ class JobProcessor:
         self,
         db: Session,
         project_id: str,
-        contributor: Contributor,
+        member: Member,
         stats_data: dict
     ):
-        """Create or update lead scores for a contributor in a project."""
+        """Create or update lead scores for a member in a project."""
         social_context = db.query(SocialContext).filter(
-            SocialContext.contributor_id == contributor.id
+            SocialContext.member_id == member.id
         ).first()
 
         social_context_data = {
@@ -194,27 +208,32 @@ class JobProcessor:
             "position_level": social_context.position_level if social_context else None
         }
 
-        contributor_data = {
-            "followers": contributor.followers or 0,
-            "public_repos": contributor.public_repos or 0,
-            "company": contributor.company
+        member_data = {
+            "followers": member.followers or 0,
+            "public_repos": member.public_repos or 0,
+            "company": member.company
         }
 
+        # Get project-specific scoring weights if available
+        project = db.query(Project).filter(Project.id == project_id).first()
+        scoring_weights = project.scoring_weights if project else None
+
         score_data = self.scoring_service.calculate_overall_score(
-            contributor_data,
+            member_data,
             stats_data,
-            social_context_data
+            social_context_data,
+            scoring_weights=scoring_weights
         )
 
         lead_score = db.query(LeadScore).filter(
             LeadScore.project_id == project_id,
-            LeadScore.contributor_id == contributor.id
+            LeadScore.member_id == member.id
         ).first()
 
         if not lead_score:
             lead_score = LeadScore(
                 project_id=project_id,
-                contributor_id=contributor.id
+                member_id=member.id
             )
             db.add(lead_score)
 
@@ -233,13 +252,13 @@ class JobProcessor:
         
         try:
             self.ensure_job_active(db, job.id)
-            # Get repository
-            repository = db.query(Repository).filter(
-                Repository.id == job.repository_id
+            # Get source
+            repository = db.query(CommunitySource).filter(
+                CommunitySource.id == job.source_id
             ).first()
             
             if not repository:
-                raise Exception("Repository not found")
+                raise Exception("Community source not found")
             
             # Initialize job
             if job.status != 'running':
@@ -321,13 +340,13 @@ class JobProcessor:
                 for contrib_data in contributors_data:
                     if processed_count % 10 == 0:
                         self.ensure_job_active(db, job.id)
-                    # Create or update contributor
-                    contributor = db.query(Contributor).filter(
-                        Contributor.github_id == contrib_data['github_id']
+                    # Create or update member
+                    member = db.query(Member).filter(
+                        Member.github_id == contrib_data['github_id']
                     ).first()
                     
-                    if not contributor:
-                        contributor = Contributor(
+                    if not member:
+                        member = Member(
                             github_id=contrib_data['github_id'],
                             username=contrib_data['username'],
                             full_name=contrib_data['full_name'],
@@ -341,32 +360,33 @@ class JobProcessor:
                             github_url=contrib_data['github_url'],
                             public_repos=contrib_data['public_repos'],
                             followers=contrib_data['followers'],
-                            following=contrib_data['following']
+                            following=contrib_data['following'],
+                            platform_identities={'github': {'id': contrib_data['github_id'], 'url': contrib_data['github_url'], 'username': contrib_data['username']}}
                         )
-                        db.add(contributor)
+                        db.add(member)
                         db.flush()
                     else:
-                        # Update existing contributor
-                        contributor.full_name = contrib_data['full_name'] or contributor.full_name
-                        contributor.email = contrib_data['email'] or contributor.email
-                        contributor.company = contrib_data['company'] or contributor.company
-                        contributor.location = contrib_data['location'] or contributor.location
-                        contributor.bio = contrib_data['bio'] or contributor.bio
-                        contributor.followers = contrib_data['followers']
-                        contributor.public_repos = contrib_data['public_repos']
+                        # Update existing member
+                        member.full_name = contrib_data['full_name'] or member.full_name
+                        member.email = contrib_data['email'] or member.email
+                        member.company = contrib_data['company'] or member.company
+                        member.location = contrib_data['location'] or member.location
+                        member.bio = contrib_data['bio'] or member.bio
+                        member.followers = contrib_data['followers']
+                        member.public_repos = contrib_data['public_repos']
                     
-                    # Create repository-contributor relationship
-                    repo_contrib = db.query(RepositoryContributor).filter(
-                        RepositoryContributor.repository_id == repository.id,
-                        RepositoryContributor.contributor_id == contributor.id
+                    # Create source-member relationship
+                    community_member = db.query(CommunityMember).filter(
+                        CommunityMember.source_id == repository.id,
+                        CommunityMember.member_id == member.id
                     ).first()
                     
-                    if not repo_contrib:
-                        repo_contrib = RepositoryContributor(
-                            repository_id=repository.id,
-                            contributor_id=contributor.id
+                    if not community_member:
+                        community_member = CommunityMember(
+                            source_id=repository.id,
+                            member_id=member.id
                         )
-                        db.add(repo_contrib)
+                        db.add(community_member)
                     
                     # Get detailed stats
                     if config.USE_BULK_CONTRIBUTOR_STATS:
@@ -393,16 +413,16 @@ class JobProcessor:
                         stats_data["pull_requests"] = prs
                         stats_data["issues_opened"] = issues
                     
-                    # Create or update contributor stats
-                    stats = db.query(ContributorStats).filter(
-                        ContributorStats.repository_id == repository.id,
-                        ContributorStats.contributor_id == contributor.id
+                    # Create or update member activity
+                    stats = db.query(MemberActivity).filter(
+                        MemberActivity.source_id == repository.id,
+                        MemberActivity.member_id == member.id
                     ).first()
                     
                     if not stats:
-                        stats = ContributorStats(
-                            repository_id=repository.id,
-                            contributor_id=contributor.id
+                        stats = MemberActivity(
+                            source_id=repository.id,
+                            member_id=member.id
                         )
                         db.add(stats)
                     
@@ -418,7 +438,7 @@ class JobProcessor:
                     stats.calculated_at = datetime.utcnow()
 
                     stats_payload = self.build_stats_payload(stats_data)
-                    self.upsert_lead_score(db, repository.project_id, contributor, stats_payload)
+                    self.upsert_lead_score(db, repository.project_id, member, stats_payload)
 
                     processed_count += 1
                     
@@ -448,22 +468,22 @@ class JobProcessor:
             self.update_progress_step(db, step4, 'running')
 
             try:
-                # Find all contributors linked to this repository that don't have social context yet
-                enriched_ids = {sc.contributor_id for sc in db.query(SocialContext.contributor_id).all()}
-                repo_contributors = db.query(RepositoryContributor).filter(
-                    RepositoryContributor.repository_id == repository.id
+                # Find all members linked to this source that don't have social context yet
+                enriched_ids = {sc.member_id for sc in db.query(SocialContext.member_id).all()}
+                source_members = db.query(CommunityMember).filter(
+                    CommunityMember.source_id == repository.id
                 ).all()
 
                 enrich_count = 0
-                for rc in repo_contributors:
-                    if rc.contributor_id in enriched_ids:
+                for cm in source_members:
+                    if cm.member_id in enriched_ids:
                         continue
                     enrich_job = SourcingJob(
                         project_id=repository.project_id,
-                        repository_id=repository.id,
+                        source_id=repository.id,
                         job_type='social_enrichment',
                         status='pending',
-                        job_metadata={'contributor_id': str(rc.contributor_id)},
+                        job_metadata={'contributor_id': str(cm.member_id)},
                         created_by=job.created_by
                     )
                     db.add(enrich_job)
@@ -472,9 +492,9 @@ class JobProcessor:
                 db.commit()
                 self.update_progress_step(
                     db, step4, 'completed',
-                    f"Queued enrichment for {enrich_count} contributors ({len(repo_contributors) - enrich_count} already enriched)"
+                    f"Queued enrichment for {enrich_count} members ({len(source_members) - enrich_count} already enriched)"
                 )
-                logger.info(f"Queued {enrich_count} enrichment jobs for repo {repository.full_name}")
+                logger.info(f"Queued {enrich_count} enrichment jobs for source {repository.full_name}")
             except Exception as e:
                 self.update_progress_step(db, step4, 'failed', str(e))
                 logger.warning(f"Failed to queue enrichment jobs: {e}")
@@ -511,14 +531,14 @@ class JobProcessor:
             contributor_id = job.job_metadata.get('contributor_id') if job.job_metadata else None
             
             if not contributor_id:
-                raise Exception("No contributor ID specified")
+                raise Exception("No member ID specified")
             
-            contributor = db.query(Contributor).filter(
-                Contributor.id == contributor_id
+            contributor = db.query(Member).filter(
+                Member.id == contributor_id
             ).first()
             
             if not contributor:
-                raise Exception("Contributor not found")
+                raise Exception("Member not found")
             
             # ── Metering: check credits before enrichment ──
             org_id = billing_service.get_user_org_id(db, job.created_by)
@@ -573,9 +593,9 @@ class JobProcessor:
                     linkedin_info.get('current_position')
                 )
                 
-                # Get contributor stats for classification
-                stats = db.query(ContributorStats).filter(
-                    ContributorStats.contributor_id == contributor.id
+                # Get member activity for classification
+                stats = db.query(MemberActivity).filter(
+                    MemberActivity.member_id == contributor.id
                 ).first()
                 
                 stats_dict = {
@@ -600,11 +620,11 @@ class JobProcessor:
                 
                 # Create or update social context
                 social_context = db.query(SocialContext).filter(
-                    SocialContext.contributor_id == contributor.id
+                    SocialContext.member_id == contributor.id
                 ).first()
                 
                 if not social_context:
-                    social_context = SocialContext(contributor_id=contributor.id)
+                    social_context = SocialContext(member_id=contributor.id)
                     db.add(social_context)
                 
                 social_context.linkedin_url = linkedin_info.get('linkedin_url')
@@ -620,16 +640,18 @@ class JobProcessor:
                 social_context.classification_reasoning = classification['classification_reasoning']
                 social_context.last_enriched_at = datetime.utcnow()
 
-                project_ids = db.query(Repository.project_id).join(
-                    RepositoryContributor, RepositoryContributor.repository_id == Repository.id
+                project_ids = db.query(CommunitySource.project_id).join(
+                    CommunityMember, CommunityMember.source_id == CommunitySource.id
                 ).filter(
-                    RepositoryContributor.contributor_id == contributor.id
+                    CommunityMember.member_id == contributor.id
                 ).distinct().all()
 
                 for (project_id,) in project_ids:
-                    stats_rows = db.query(ContributorStats).join(Repository).filter(
-                        Repository.project_id == project_id,
-                        ContributorStats.contributor_id == contributor.id
+                    stats_rows = db.query(MemberActivity).join(
+                        CommunitySource, MemberActivity.source_id == CommunitySource.id
+                    ).filter(
+                        CommunitySource.project_id == project_id,
+                        MemberActivity.member_id == contributor.id
                     ).all()
                     stats_payload = self.aggregate_stats(stats_rows)
                     self.upsert_lead_score(db, project_id, contributor, stats_payload)
@@ -668,17 +690,17 @@ class JobProcessor:
             db.commit()
     
     async def process_stargazer_analysis(self, db: Session, job: SourcingJob):
-        """Process stargazer analysis job — fetch stargazers, create contributors, enrich."""
+        """Process stargazer analysis job — fetch stargazers, create members, enrich."""
         logger.info(f"Processing stargazer analysis job {job.id}")
 
         try:
             self.ensure_job_active(db, job.id)
-            repository = db.query(Repository).filter(
-                Repository.id == job.repository_id
+            repository = db.query(CommunitySource).filter(
+                CommunitySource.id == job.source_id
             ).first()
 
             if not repository:
-                raise Exception("Repository not found")
+                raise Exception("Community source not found")
 
             if job.status != 'running':
                 job.status = 'running'
@@ -721,12 +743,12 @@ class JobProcessor:
                     if processed_count % 10 == 0:
                         self.ensure_job_active(db, job.id)
 
-                    contributor = db.query(Contributor).filter(
-                        Contributor.github_id == sg_data['github_id']
+                    member = db.query(Member).filter(
+                        Member.github_id == sg_data['github_id']
                     ).first()
 
-                    if not contributor:
-                        contributor = Contributor(
+                    if not member:
+                        member = Member(
                             github_id=sg_data['github_id'],
                             username=sg_data['username'],
                             full_name=sg_data['full_name'],
@@ -740,41 +762,42 @@ class JobProcessor:
                             github_url=sg_data['github_url'],
                             public_repos=sg_data['public_repos'],
                             followers=sg_data['followers'],
-                            following=sg_data['following']
+                            following=sg_data['following'],
+                            platform_identities={'github': {'id': sg_data['github_id'], 'url': sg_data['github_url'], 'username': sg_data['username']}}
                         )
-                        db.add(contributor)
+                        db.add(member)
                         db.flush()
                     else:
-                        contributor.full_name = sg_data['full_name'] or contributor.full_name
-                        contributor.email = sg_data['email'] or contributor.email
-                        contributor.company = sg_data['company'] or contributor.company
-                        contributor.bio = sg_data['bio'] or contributor.bio
-                        contributor.followers = sg_data['followers']
-                        contributor.public_repos = sg_data['public_repos']
+                        member.full_name = sg_data['full_name'] or member.full_name
+                        member.email = sg_data['email'] or member.email
+                        member.company = sg_data['company'] or member.company
+                        member.bio = sg_data['bio'] or member.bio
+                        member.followers = sg_data['followers']
+                        member.public_repos = sg_data['public_repos']
 
-                    # Create repo-contributor relationship
-                    repo_contrib = db.query(RepositoryContributor).filter(
-                        RepositoryContributor.repository_id == repository.id,
-                        RepositoryContributor.contributor_id == contributor.id
+                    # Create source-member relationship
+                    community_member = db.query(CommunityMember).filter(
+                        CommunityMember.source_id == repository.id,
+                        CommunityMember.member_id == member.id
                     ).first()
 
-                    if not repo_contrib:
-                        repo_contrib = RepositoryContributor(
-                            repository_id=repository.id,
-                            contributor_id=contributor.id
+                    if not community_member:
+                        community_member = CommunityMember(
+                            source_id=repository.id,
+                            member_id=member.id
                         )
-                        db.add(repo_contrib)
+                        db.add(community_member)
 
-                    # Create contributor_stats with source='stargazer'
-                    stats = db.query(ContributorStats).filter(
-                        ContributorStats.repository_id == repository.id,
-                        ContributorStats.contributor_id == contributor.id
+                    # Create member_activity with source='stargazer'
+                    stats = db.query(MemberActivity).filter(
+                        MemberActivity.source_id == repository.id,
+                        MemberActivity.member_id == member.id
                     ).first()
 
                     if not stats:
-                        stats = ContributorStats(
-                            repository_id=repository.id,
-                            contributor_id=contributor.id,
+                        stats = MemberActivity(
+                            source_id=repository.id,
+                            member_id=member.id,
                             source='stargazer'
                         )
                         db.add(stats)
@@ -792,7 +815,7 @@ class JobProcessor:
                         "code_reviews": 0,
                         "is_maintainer": False
                     }
-                    self.upsert_lead_score(db, repository.project_id, contributor, stats_payload)
+                    self.upsert_lead_score(db, repository.project_id, member, stats_payload)
 
                     processed_count += 1
                     if processed_count % 25 == 0:
@@ -819,21 +842,21 @@ class JobProcessor:
             self.update_progress_step(db, step3, 'running')
 
             try:
-                enriched_ids = {sc.contributor_id for sc in db.query(SocialContext.contributor_id).all()}
-                repo_contributors = db.query(RepositoryContributor).filter(
-                    RepositoryContributor.repository_id == repository.id
+                enriched_ids = {sc.member_id for sc in db.query(SocialContext.member_id).all()}
+                source_members = db.query(CommunityMember).filter(
+                    CommunityMember.source_id == repository.id
                 ).all()
 
                 enrich_count = 0
-                for rc in repo_contributors:
-                    if rc.contributor_id in enriched_ids:
+                for cm in source_members:
+                    if cm.member_id in enriched_ids:
                         continue
                     enrich_job = SourcingJob(
                         project_id=repository.project_id,
-                        repository_id=repository.id,
+                        source_id=repository.id,
                         job_type='social_enrichment',
                         status='pending',
-                        job_metadata={'contributor_id': str(rc.contributor_id)},
+                        job_metadata={'contributor_id': str(cm.member_id)},
                         created_by=job.created_by
                     )
                     db.add(enrich_job)
@@ -871,10 +894,239 @@ class JobProcessor:
             job.completed_at = datetime.utcnow()
             db.commit()
 
+    # ── Token / config requirement map for each source type ────────────
+    _SOURCE_TOKEN_HINTS: dict = {
+        'github_repo': 'GITHUB_TOKEN',
+        'discord_server': 'DISCORD_BOT_TOKEN',
+        'reddit_subreddit': 'REDDIT_CLIENT_ID / REDDIT_CLIENT_SECRET',
+        'x_account': 'X_BEARER_TOKEN',
+        'stock_forum': 'STOCKTWITS_TOKEN',
+    }
+
+    async def process_source_ingestion(self, db: Session, job: SourcingJob):
+        """Process a generic source ingestion job.
+
+        For source types that don't yet have a connector implementation,
+        the job fails immediately with a descriptive error — exactly the
+        same pattern used when a GitHub token is missing.
+        """
+        logger.info(f"Processing source_ingestion job {job.id}")
+
+        try:
+            self.ensure_job_active(db, job.id)
+
+            source = db.query(CommunitySource).filter(
+                CommunitySource.id == job.source_id
+            ).first()
+
+            if not source:
+                raise Exception("Community source not found")
+
+            # Initialize job
+            if job.status != 'running':
+                job.status = 'running'
+            if not job.started_at:
+                job.started_at = datetime.utcnow()
+            job.total_steps = 1
+            db.commit()
+
+            step1 = self.create_progress_step(
+                db, job.id, 1, f"Connecting to {source.source_type} source"
+            )
+            self.update_progress_step(db, step1, 'running')
+
+            # Try to get a connector from the registry
+            try:
+                from connectors.registry import ConnectorRegistry
+                connector_cls = ConnectorRegistry.get(source.source_type)
+            except Exception:
+                connector_cls = None
+
+            if connector_cls is None:
+                hint = self._SOURCE_TOKEN_HINTS.get(source.source_type, '')
+                msg = (
+                    f"No connector available for source type '{source.source_type}'. "
+                    f"This community type is not yet supported for automatic ingestion."
+                )
+                if hint:
+                    msg += f" When available, it will require: {hint} (set in Settings > API Keys)."
+                self.update_progress_step(db, step1, 'failed', msg)
+                raise Exception(msg)
+
+            # Connector exists — check if it can actually connect
+            # (e.g. token might be missing even though connector code exists)
+            try:
+                from settings_service import get_setting, get_user_org_id
+                org_id = get_user_org_id(db, job.created_by) if job.created_by else None
+                source_config = dict(source.source_config or {})
+                connector = connector_cls(
+                    db=db, user_id=job.created_by, source_config=source_config
+                )
+            except (ValueError, Exception) as e:
+                hint = self._SOURCE_TOKEN_HINTS.get(source.source_type, '')
+                msg = str(e)
+                if hint and 'token' in msg.lower():
+                    msg += f" Configure {hint} in Settings > API Keys."
+                self.update_progress_step(db, step1, 'failed', msg)
+                raise Exception(msg)
+
+            # If we reach here the connector initialized — attempt fetch
+            try:
+                members_data = await connector.fetch_members(source, limit=100)
+                self.update_progress_step(
+                    db, step1, 'completed',
+                    f"Fetched {len(members_data)} members from {source.full_name}"
+                )
+            except Exception as e:
+                self.update_progress_step(db, step1, 'failed', str(e))
+                raise
+
+            self.update_job_progress(db, job, 1, 1)
+
+            # Process fetched members (same pattern as GitHub contributors)
+            platform_key = source.source_type.split('_')[0]  # github, discord, reddit, x, stock
+            processed_count = 0
+            for m_data in members_data:
+                platform_id = m_data.get('platform_id')
+                username = m_data.get('username', '')
+
+                # Try to find existing member by platform identity or username
+                member = None
+                if platform_id:
+                    if source.source_type == 'github_repo':
+                        member = db.query(Member).filter(
+                            Member.github_id == platform_id
+                        ).first()
+                    if not member:
+                        # Search in platform_identities JSONB
+                        member = db.query(Member).filter(
+                            Member.platform_identities[platform_key]['id'].astext == str(platform_id)
+                        ).first()
+                if not member and username:
+                    member = db.query(Member).filter(
+                        Member.username == username
+                    ).first()
+
+                if not member:
+                    member = Member(
+                        username=username,
+                        full_name=m_data.get('full_name'),
+                        email=m_data.get('email'),
+                        company=m_data.get('company'),
+                        location=m_data.get('location'),
+                        bio=m_data.get('bio'),
+                        avatar_url=m_data.get('avatar_url'),
+                        github_url=m_data.get('profile_url') if source.source_type == 'github_repo' else None,
+                        public_repos=m_data.get('public_repos', 0),
+                        followers=m_data.get('followers', 0),
+                        following=m_data.get('following', 0),
+                        platform_identities={
+                            platform_key: {
+                                'id': str(platform_id) if platform_id else username,
+                                'username': username,
+                            }
+                        },
+                    )
+                    if source.source_type == 'github_repo' and platform_id:
+                        member.github_id = platform_id
+                    db.add(member)
+                    db.flush()
+                else:
+                    # Update fields if newer data available
+                    member.full_name = m_data.get('full_name') or member.full_name
+                    member.email = m_data.get('email') or member.email
+                    member.company = m_data.get('company') or member.company
+                    member.bio = m_data.get('bio') or member.bio
+                    member.avatar_url = m_data.get('avatar_url') or member.avatar_url
+                    member.followers = m_data.get('followers') or member.followers
+                    # Merge platform identity
+                    identities = dict(member.platform_identities or {})
+                    if platform_key not in identities:
+                        identities[platform_key] = {
+                            'id': str(platform_id) if platform_id else username,
+                            'username': username,
+                        }
+                        member.platform_identities = identities
+
+                # Create source-member link
+                cm = db.query(CommunityMember).filter(
+                    CommunityMember.source_id == source.id,
+                    CommunityMember.member_id == member.id,
+                ).first()
+                if not cm:
+                    cm = CommunityMember(source_id=source.id, member_id=member.id)
+                    db.add(cm)
+
+                # Create/update activity stub
+                activity = db.query(MemberActivity).filter(
+                    MemberActivity.source_id == source.id,
+                    MemberActivity.member_id == member.id,
+                ).first()
+                if not activity:
+                    activity = MemberActivity(
+                        source_id=source.id, member_id=member.id
+                    )
+                    db.add(activity)
+                activity.calculated_at = datetime.utcnow()
+
+                # Score
+                stats_payload = self.build_stats_payload({})
+                self.upsert_lead_score(db, source.project_id, member, stats_payload)
+
+                processed_count += 1
+                if processed_count % 25 == 0:
+                    db.commit()
+
+            source.last_sourced_at = datetime.utcnow()
+            db.commit()
+
+            # Queue enrichment for new members
+            enriched_ids = {sc.member_id for sc in db.query(SocialContext.member_id).all()}
+            source_members = db.query(CommunityMember).filter(
+                CommunityMember.source_id == source.id
+            ).all()
+            enrich_count = 0
+            for cm in source_members:
+                if cm.member_id in enriched_ids:
+                    continue
+                enrich_job = SourcingJob(
+                    project_id=source.project_id,
+                    source_id=source.id,
+                    job_type='social_enrichment',
+                    status='pending',
+                    job_metadata={'contributor_id': str(cm.member_id)},
+                    created_by=job.created_by,
+                )
+                db.add(enrich_job)
+                enrich_count += 1
+            db.commit()
+            logger.info(f"Queued {enrich_count} enrichment jobs for source {source.full_name}")
+
+            # Finalize
+            job.status = 'completed'
+            job.completed_at = datetime.utcnow()
+            job.progress_percentage = 100
+            db.commit()
+
+            logger.info(f"Completed source_ingestion job {job.id}: {processed_count} members")
+
+            self._check_auto_export(db, job)
+
+        except JobCancelledError:
+            logger.info(f"Job {job.id} cancelled")
+            self.mark_job_cancelled(db, job.id)
+            return
+        except Exception as e:
+            logger.error(f"Error processing source_ingestion job {job.id}: {e}")
+            job.status = 'failed'
+            job.error_message = str(e)[:500]
+            job.completed_at = datetime.utcnow()
+            db.commit()
+
     def _check_auto_export(self, db: Session, job: SourcingJob):
         """After a sourcing/stargazer job completes, check if auto-export to Clay is enabled
         and queue a clay_push job for new leads that haven't been pushed yet."""
-        from models import ClayPushLog, OrgMember
+        from models import ClayPushLog
         from settings_service import get_setting
         from decimal import Decimal
 
@@ -886,9 +1138,9 @@ class JobProcessor:
             # Resolve org
             org_id = None
             if job.created_by:
-                member = db.query(OrgMember).filter(OrgMember.user_id == job.created_by).first()
-                if member:
-                    org_id = member.org_id
+                org_member = db.query(OrgMember).filter(OrgMember.user_id == job.created_by).first()
+                if org_member:
+                    org_id = org_member.org_id
 
             # Check Clay is configured
             webhook_url = get_setting(db, 'CLAY_WEBHOOK_URL', org_id=org_id, user_id=job.created_by)
@@ -896,19 +1148,19 @@ class JobProcessor:
                 logger.info(f"Auto-export skipped for project {project.name}: Clay webhook not configured")
                 return
 
-            # Get all contributor IDs in this project
-            project_contributor_ids = db.query(RepositoryContributor.contributor_id).join(
-                Repository, Repository.id == RepositoryContributor.repository_id
-            ).filter(Repository.project_id == project.id).distinct().all()
-            all_ids = {str(row[0]) for row in project_contributor_ids}
+            # Get all member IDs in this project
+            project_member_ids = db.query(CommunityMember.member_id).join(
+                CommunitySource, CommunitySource.id == CommunityMember.source_id
+            ).filter(CommunitySource.project_id == project.id).distinct().all()
+            all_ids = {str(row[0]) for row in project_member_ids}
 
             if not all_ids:
                 return
 
-            # Exclude already-pushed contributors
+            # Exclude already-pushed members
             already_pushed = set()
             if org_id:
-                pushed_rows = db.query(ClayPushLog.contributor_id).filter(
+                pushed_rows = db.query(ClayPushLog.member_id).filter(
                     ClayPushLog.org_id == org_id,
                     ClayPushLog.project_id == project.id,
                     ClayPushLog.status == 'success',
@@ -926,7 +1178,7 @@ class JobProcessor:
                 for cid in new_ids:
                     score = db.query(LeadScore).filter(
                         LeadScore.project_id == project.id,
-                        LeadScore.contributor_id == cid,
+                        LeadScore.member_id == cid,
                     ).first()
                     if not score:
                         continue
@@ -934,7 +1186,7 @@ class JobProcessor:
                         continue
                     if project.auto_export_clay_classifications:
                         social = db.query(SocialContext.classification).filter(
-                            SocialContext.contributor_id == cid
+                            SocialContext.member_id == cid
                         ).first()
                         if not social or social.classification not in project.auto_export_clay_classifications:
                             continue
@@ -969,7 +1221,7 @@ class JobProcessor:
     async def process_clay_push(self, db: Session, job: SourcingJob):
         """Process clay_push job — push leads to Clay via webhook."""
         from services.clay_service import build_lead_payload, push_lead_to_clay
-        from models import ClayPushLog, OrgMember
+        from models import ClayPushLog
         from settings_service import get_setting
 
         logger.info(f"Processing clay_push job {job.id}")
@@ -989,9 +1241,9 @@ class JobProcessor:
             # Resolve org
             org_id = None
             if job.created_by:
-                member = db.query(OrgMember).filter(OrgMember.user_id == job.created_by).first()
-                if member:
-                    org_id = member.org_id
+                org_member = db.query(OrgMember).filter(OrgMember.user_id == job.created_by).first()
+                if org_member:
+                    org_id = org_member.org_id
 
             # Get Clay webhook URL
             webhook_url = get_setting(db, 'CLAY_WEBHOOK_URL', org_id=org_id, user_id=job.created_by)
@@ -1017,8 +1269,8 @@ class JobProcessor:
             step1 = self.create_progress_step(db, job.id, 1, "Preparing leads")
             self.update_progress_step(db, step1, 'running')
 
-            contributors = db.query(Contributor).filter(
-                Contributor.id.in_(lead_ids)
+            contributors = db.query(Member).filter(
+                Member.id.in_(lead_ids)
             ).all()
 
             if not contributors:
@@ -1053,7 +1305,7 @@ class JobProcessor:
                 log_entry = ClayPushLog(
                     org_id=org_id,
                     job_id=job.id,
-                    contributor_id=contributor.id,
+                    member_id=contributor.id,
                     project_id=project_id,
                     status='success' if ok else 'failed',
                     error_message=error,
@@ -1143,6 +1395,8 @@ class JobProcessor:
 
             if db_job.job_type == 'repository_sourcing':
                 await self.process_repository_sourcing(db, db_job)
+            elif db_job.job_type == 'source_ingestion':
+                await self.process_source_ingestion(db, db_job)
             elif db_job.job_type == 'social_enrichment':
                 await self.process_social_enrichment(db, db_job)
             elif db_job.job_type == 'stargazer_analysis':

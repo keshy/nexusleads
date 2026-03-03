@@ -54,12 +54,12 @@ class ScoringService:
         
         return Decimal(str(min(score, 100.0)))
     
-    def calculate_influence_score(self, contributor: Dict[str, Any]) -> Decimal:
-        """Calculate influence score based on GitHub profile."""
+    def calculate_influence_score(self, member: Dict[str, Any]) -> Decimal:
+        """Calculate influence score based on member profile."""
         score = 0.0
         
         # Followers (50 points)
-        followers = contributor.get('followers', 0)
+        followers = member.get('followers', 0)
         if followers >= 1000:
             score += 50
         elif followers >= 500:
@@ -72,7 +72,7 @@ class ScoringService:
             score += 10
         
         # Public repos (30 points)
-        repos = contributor.get('public_repos', 0)
+        repos = member.get('public_repos', 0)
         if repos >= 50:
             score += 30
         elif repos >= 20:
@@ -83,7 +83,7 @@ class ScoringService:
             score += 10
         
         # Has company (20 points)
-        if contributor.get('company'):
+        if member.get('company'):
             score += 20
         
         return Decimal(str(min(score, 100.0)))
@@ -158,25 +158,43 @@ class ScoringService:
     
     def calculate_overall_score(
         self,
-        contributor: Dict[str, Any],
+        member: Dict[str, Any],
         stats: Dict[str, Any],
-        social_context: Dict[str, Any]
+        social_context: Dict[str, Any],
+        scoring_weights: Dict[str, float] = None
     ) -> Dict[str, Any]:
-        """Calculate overall lead score."""
+        """Calculate overall lead score.
+        
+        Args:
+            member: Member profile data (followers, public_repos, company)
+            stats: Activity stats (commits, PRs, issues, etc.)
+            social_context: Classification and position data
+            scoring_weights: Optional project-specific weights from presets/config.
+                             Keys: position, activity, influence, engagement (0-1 each).
+        """
         
         # Calculate individual scores
         activity_score = self.calculate_activity_score(stats)
-        influence_score = self.calculate_influence_score(contributor)
+        influence_score = self.calculate_influence_score(member)
         position_score = self.calculate_position_score(social_context)
         engagement_score = self.calculate_engagement_score(stats)
         
-        # Weighted average (position is most important for PLG)
-        weights = {
-            'position': 0.4,
-            'activity': 0.25,
-            'influence': 0.20,
-            'engagement': 0.15
-        }
+        # Use project-specific weights or defaults
+        if scoring_weights:
+            weights = {
+                'position': scoring_weights.get('position', 0.35),
+                'activity': scoring_weights.get('activity', 0.25),
+                'influence': scoring_weights.get('influence', 0.20),
+                'engagement': scoring_weights.get('engagement', 0.20)
+            }
+        else:
+            # Default weights (position-heavy for PLG)
+            weights = {
+                'position': 0.35,
+                'activity': 0.25,
+                'influence': 0.20,
+                'engagement': 0.20
+            }
         
         overall_score = (
             float(position_score) * weights['position'] +

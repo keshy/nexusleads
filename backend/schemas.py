@@ -58,6 +58,53 @@ class UserUpdate(BaseModel):
     password: Optional[str] = None
 
 
+# Classification & Scoring schemas
+class ClassificationLabel(BaseModel):
+    key: str = Field(..., max_length=50)
+    label: str = Field(..., max_length=100)
+    description: str = Field(..., max_length=500)
+
+
+class ScoringWeights(BaseModel):
+    position: float = Field(0.35, ge=0, le=1)
+    activity: float = Field(0.25, ge=0, le=1)
+    influence: float = Field(0.20, ge=0, le=1)
+    engagement: float = Field(0.20, ge=0, le=1)
+
+
+# Scoring presets
+SCORING_PRESETS = {
+    "developer_community": {
+        "label": "Developer Community",
+        "description": "Optimized for open-source and developer communities (activity-heavy)",
+        "weights": ScoringWeights(position=0.20, activity=0.35, influence=0.20, engagement=0.25),
+    },
+    "executive_network": {
+        "label": "Executive Network",
+        "description": "Optimized for identifying decision makers and buyers (position-heavy)",
+        "weights": ScoringWeights(position=0.45, activity=0.15, influence=0.25, engagement=0.15),
+    },
+    "social_engagement": {
+        "label": "Social Engagement",
+        "description": "Optimized for social communities like Discord, Reddit, X (engagement-heavy)",
+        "weights": ScoringWeights(position=0.15, activity=0.25, influence=0.25, engagement=0.35),
+    },
+    "balanced": {
+        "label": "Balanced",
+        "description": "Equal weighting across all dimensions",
+        "weights": ScoringWeights(position=0.25, activity=0.25, influence=0.25, engagement=0.25),
+    },
+}
+
+DEFAULT_SCORING_WEIGHTS = ScoringWeights(position=0.35, activity=0.25, influence=0.20, engagement=0.20)
+
+DEFAULT_CLASSIFICATION_LABELS = [
+    ClassificationLabel(key="DECISION_MAKER", label="Decision Maker", description="C-suite, VPs, Directors who can make purchasing decisions"),
+    ClassificationLabel(key="KEY_CONTRIBUTOR", label="Key Contributor", description="Core team members, maintainers, architects with high influence"),
+    ClassificationLabel(key="HIGH_IMPACT", label="High Impact", description="Active participants with significant recent activity"),
+]
+
+
 # Project schemas
 class ProjectBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
@@ -68,7 +115,9 @@ class ProjectBase(BaseModel):
 
 
 class ProjectCreate(ProjectBase):
-    pass
+    classification_labels: Optional[List[ClassificationLabel]] = None
+    scoring_weights: Optional[ScoringWeights] = None
+    scoring_preset: Optional[str] = None
 
 
 class ProjectUpdate(BaseModel):
@@ -81,6 +130,9 @@ class ProjectUpdate(BaseModel):
     auto_export_clay_enabled: Optional[bool] = None
     auto_export_clay_min_score: Optional[int] = None
     auto_export_clay_classifications: Optional[List[str]] = None
+    classification_labels: Optional[List[ClassificationLabel]] = None
+    scoring_weights: Optional[ScoringWeights] = None
+    scoring_preset: Optional[str] = None
 
 
 class ProjectResponse(ProjectBase):
@@ -90,6 +142,9 @@ class ProjectResponse(ProjectBase):
     auto_export_clay_enabled: bool = False
     auto_export_clay_min_score: Optional[int] = None
     auto_export_clay_classifications: Optional[List[str]] = None
+    classification_labels: Optional[List[ClassificationLabel]] = None
+    scoring_weights: Optional[ScoringWeights] = None
+    scoring_preset: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     
@@ -98,8 +153,8 @@ class ProjectResponse(ProjectBase):
 
 
 class ProjectStats(BaseModel):
-    total_repositories: int
-    total_contributors: int
+    total_sources: int
+    total_members: int
     qualified_leads: int
     active_jobs: int
 
@@ -108,27 +163,31 @@ class ProjectWithStats(ProjectResponse):
     stats: ProjectStats
 
 
-# Repository schemas
-class RepositoryBase(BaseModel):
-    github_url: str = Field(..., max_length=500)
+# Community Source schemas
+class CommunitySourceBase(BaseModel):
+    source_type: str = Field(default="github_repo")
+    external_url: str = Field(..., max_length=500)
     sourcing_interval: str = Field(default="monthly", pattern="^(daily|weekly|monthly)$")
+    source_config: Optional[Dict[str, Any]] = None
 
 
-class RepositoryCreate(RepositoryBase):
+class CommunitySourceCreate(CommunitySourceBase):
     project_id: UUID
 
 
-class RepositoryUpdate(BaseModel):
+class CommunitySourceUpdate(BaseModel):
     sourcing_interval: Optional[str] = Field(None, pattern="^(daily|weekly|monthly)$")
     is_active: Optional[bool] = None
+    source_config: Optional[Dict[str, Any]] = None
 
 
-class RepositoryResponse(RepositoryBase):
+class CommunitySourceResponse(CommunitySourceBase):
     id: UUID
     project_id: UUID
     full_name: str
-    owner: str
-    repo_name: str
+    owner: Optional[str] = None
+    repo_name: Optional[str] = None
+    github_url: Optional[str] = None
     description: Optional[str] = None
     stars: Optional[int] = None
     forks: Optional[int] = None
@@ -144,14 +203,15 @@ class RepositoryResponse(RepositoryBase):
         from_attributes = True
 
 
-# Contributor schemas
-class ContributorBase(BaseModel):
+# Member schemas
+class MemberBase(BaseModel):
     username: str
-    github_id: int
+    github_id: Optional[int] = None
 
 
-class ContributorResponse(ContributorBase):
+class MemberResponse(MemberBase):
     id: UUID
+    platform_identities: Optional[Dict[str, Any]] = None
     full_name: Optional[str] = None
     email: Optional[str] = None
     company: Optional[str] = None
@@ -161,20 +221,21 @@ class ContributorResponse(ContributorBase):
     twitter_username: Optional[str] = None
     avatar_url: Optional[str] = None
     github_url: Optional[str] = None
-    public_repos: int
-    followers: int
-    following: int
+    public_repos: int = 0
+    followers: int = 0
+    following: int = 0
     created_at: datetime
     
     class Config:
         from_attributes = True
 
 
-# Contributor stats schemas
-class ContributorStatsResponse(BaseModel):
+# Member activity schemas
+class MemberActivityResponse(BaseModel):
     id: Optional[UUID] = None
-    repository_id: Optional[UUID] = None
-    contributor_id: UUID
+    source_id: Optional[UUID] = None
+    member_id: UUID
+    activity_type: str = 'commit'
     total_commits: int
     commits_last_3_months: int
     commits_last_6_months: int
@@ -198,7 +259,7 @@ class ContributorStatsResponse(BaseModel):
 # Social context schemas
 class SocialContextResponse(BaseModel):
     id: UUID
-    contributor_id: UUID
+    member_id: UUID
     linkedin_url: Optional[str] = None
     linkedin_profile_photo_url: Optional[str] = None
     linkedin_headline: Optional[str] = None
@@ -206,12 +267,12 @@ class SocialContextResponse(BaseModel):
     current_position: Optional[str] = None
     position_level: Optional[str] = None
     years_of_experience: Optional[int] = None
-    skills: List[str] = []
+    skills: Optional[List[str]] = []
     classification: Optional[str] = None
     classification_confidence: Optional[Decimal] = None
     classification_reasoning: Optional[str] = None
-    is_verified: bool
-    last_enriched_at: datetime
+    is_verified: bool = False
+    last_enriched_at: Optional[datetime] = None
     
     class Config:
         from_attributes = True
@@ -221,7 +282,7 @@ class SocialContextResponse(BaseModel):
 class LeadScoreResponse(BaseModel):
     id: UUID
     project_id: UUID
-    contributor_id: UUID
+    member_id: UUID
     overall_score: Decimal
     activity_score: Decimal
     influence_score: Decimal
@@ -237,9 +298,9 @@ class LeadScoreResponse(BaseModel):
 
 
 class LeadDetail(BaseModel):
-    """Detailed lead information combining contributor, stats, and social context."""
-    contributor: ContributorResponse
-    stats: Optional[ContributorStatsResponse] = None
+    """Detailed lead information combining member, activity, and social context."""
+    member: MemberResponse
+    stats: Optional[MemberActivityResponse] = None
     social_context: Optional[SocialContextResponse] = None
     lead_score: Optional[LeadScoreResponse] = None
 
@@ -247,15 +308,15 @@ class LeadDetail(BaseModel):
 # Job schemas
 class SourcingJobCreate(BaseModel):
     project_id: Optional[UUID] = None
-    repository_id: Optional[UUID] = None
-    job_type: str = Field(..., pattern="^(repository_sourcing|social_enrichment|similar_repos)$")
+    source_id: Optional[UUID] = None
+    job_type: str = Field(..., pattern="^(source_ingestion|social_enrichment|similar_sources|stargazer_analysis)$")
     metadata: Optional[Dict[str, Any]] = None
 
 
 class SourcingJobResponse(BaseModel):
     id: UUID
     project_id: Optional[UUID] = None
-    repository_id: Optional[UUID] = None
+    source_id: Optional[UUID] = None
     job_type: str
     status: str
     total_steps: int
@@ -267,7 +328,7 @@ class SourcingJobResponse(BaseModel):
     job_metadata: Optional[Dict[str, Any]] = None
     created_at: datetime
     project_name: Optional[str] = None
-    repository_name: Optional[str] = None
+    source_name: Optional[str] = None
     
     class Config:
         from_attributes = True
@@ -297,8 +358,8 @@ class SourcingJobWithProgress(SourcingJobResponse):
 # Dashboard schemas
 class DashboardStats(BaseModel):
     total_projects: int
-    total_repositories: int
-    total_contributors: int
+    total_sources: int
+    total_members: int
     qualified_leads: int
     decision_makers: int
     key_contributors: int
@@ -308,10 +369,11 @@ class DashboardStats(BaseModel):
     completed_jobs_today: int
 
 
-class RepositoryLeadStats(BaseModel):
-    repository_id: UUID
-    repository_name: str
-    total_contributors: int
+class SourceLeadStats(BaseModel):
+    source_id: UUID
+    source_name: str
+    source_type: str = 'github_repo'
+    total_members: int
     qualified_leads: int
     decision_makers: int
     key_contributors: int
@@ -319,19 +381,21 @@ class RepositoryLeadStats(BaseModel):
 
 
 # Search schemas
-class SimilarRepoSearch(BaseModel):
+class SourceDiscoverySearch(BaseModel):
     query: str = Field(..., min_length=1, max_length=500)
+    source_type: str = Field(default="github_repo")
     limit: int = Field(default=10, ge=1, le=50)
 
 
-class SimilarRepoResult(BaseModel):
+class SourceDiscoveryResult(BaseModel):
     full_name: str
     description: Optional[str] = None
-    stars: int
-    forks: int
+    stars: int = 0
+    forks: int = 0
     language: Optional[str] = None
     topics: List[str] = []
     url: str
+    source_type: str = 'github_repo'
 
 
 # Settings schemas

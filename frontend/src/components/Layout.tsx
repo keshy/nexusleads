@@ -4,7 +4,7 @@ import { useTheme } from '../contexts/ThemeContext'
 import { 
   LayoutDashboard, 
   FolderKanban, 
-  GitBranch, 
+  Globe,
   UserCheck, 
   Briefcase,
   LogOut,
@@ -22,6 +22,7 @@ import MatrixBackground from './MatrixBackground'
 import NexusLogo from './NexusLogo'
 import ChatSidecar from './ChatSidecar'
 import { api } from '../lib/api'
+import { FEATURE_BILLING } from '../lib/featureFlags'
 
 export default function Layout() {
   const { user, logout } = useAuth()
@@ -31,7 +32,9 @@ export default function Layout() {
   const [creditBalance, setCreditBalance] = useState<number | null>(null)
 
   useEffect(() => {
-    api.getBillingBalance().then((b: any) => setCreditBalance(b?.credit_balance ?? null)).catch(() => {})
+    if (FEATURE_BILLING) {
+      api.getBillingBalance().then((b: any) => setCreditBalance(b?.credit_balance ?? null)).catch(() => {})
+    }
   }, [])
 
   const orgs = user?.organizations || []
@@ -41,7 +44,7 @@ export default function Layout() {
   const navigation = [
     { name: 'Dashboard', href: '/app', icon: LayoutDashboard },
     { name: 'Projects', href: '/app/projects', icon: FolderKanban },
-    { name: 'Repositories', href: '/app/repositories', icon: GitBranch },
+    { name: 'Sources', href: '/app/sources', icon: Globe },
     { name: 'Leads', href: '/app/leads', icon: UserCheck },
     { name: 'Jobs', href: '/app/jobs', icon: Briefcase },
     { name: 'separator', href: '', icon: Blocks },
@@ -67,23 +70,33 @@ export default function Layout() {
         } relative z-10 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border-r border-gray-200/80 dark:border-gray-700/80 transition-all duration-300 flex flex-col`}
       >
         {/* Logo */}
-        <div className="flex items-center justify-between h-16 px-4 border-b border-gray-200/80 dark:border-gray-700/80">
-          <div className="flex items-center space-x-2.5 min-w-0">
-            <NexusLogo size={28} className="flex-shrink-0" />
-            {sidebarOpen && (
-              <div className="min-w-0">
-                <h1 className="text-lg font-bold bg-gradient-to-r from-cyan-500 via-violet-500 to-cyan-500 bg-clip-text text-transparent leading-tight">
-                  NexusLeads
-                </h1>
+        <div className={`flex items-center h-16 px-4 border-b border-gray-200/80 dark:border-gray-700/80 ${sidebarOpen ? 'justify-between' : 'justify-center'}`}>
+          {sidebarOpen ? (
+            <>
+              <div className="flex items-center space-x-2.5 min-w-0">
+                <NexusLogo size={28} className="flex-shrink-0" />
+                <div className="min-w-0">
+                  <h1 className="text-lg font-bold bg-gradient-to-r from-cyan-500 via-violet-500 to-cyan-500 bg-clip-text text-transparent leading-tight">
+                    NexusLeads
+                  </h1>
+                </div>
               </div>
-            )}
-          </div>
-          <button
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300"
-          >
-            <Menu className="w-5 h-5" />
-          </button>
+              <button
+                onClick={() => setSidebarOpen(false)}
+                className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300"
+              >
+                <Menu className="w-5 h-5" />
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+              title="Expand sidebar"
+            >
+              <NexusLogo size={28} />
+            </button>
+          )}
         </div>
 
         {/* Org switcher */}
@@ -126,7 +139,8 @@ export default function Layout() {
               <Link
                 key={item.name}
                 to={item.href}
-                className={`flex items-center px-3 py-2 rounded-lg transition-all duration-150 ${
+                title={!sidebarOpen ? item.name : undefined}
+                className={`flex items-center ${sidebarOpen ? 'px-3' : 'justify-center'} py-2 rounded-lg transition-all duration-150 ${
                   active
                     ? 'bg-gradient-to-r from-cyan-500/20 to-violet-500/20 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30 dark:border-cyan-400/20'
                     : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100/80 dark:hover:bg-gray-700/60'
@@ -139,8 +153,8 @@ export default function Layout() {
           })}
         </nav>
 
-        {/* Credit Balance */}
-        {creditBalance !== null && sidebarOpen && (
+        {/* Credit Balance (behind FEATURE_BILLING flag) */}
+        {FEATURE_BILLING && creditBalance !== null && sidebarOpen && (
           <div className="mx-3 mb-1">
             <Link
               to="/app/settings"
@@ -152,7 +166,7 @@ export default function Layout() {
             </Link>
           </div>
         )}
-        {creditBalance !== null && !sidebarOpen && (
+        {FEATURE_BILLING && creditBalance !== null && !sidebarOpen && (
           <div className="mx-3 mb-1 flex justify-center">
             <Link
               to="/app/settings"
@@ -169,7 +183,7 @@ export default function Layout() {
           {/* Theme Toggle */}
           <button
             onClick={toggleTheme}
-            className="w-full flex items-center px-3 py-2 rounded-lg hover:bg-gray-100/80 dark:hover:bg-gray-700/60 text-gray-700 dark:text-gray-300 transition-colors"
+            className={`w-full flex items-center ${sidebarOpen ? 'px-3' : 'justify-center'} py-2 rounded-lg hover:bg-gray-100/80 dark:hover:bg-gray-700/60 text-gray-700 dark:text-gray-300 transition-colors`}
             title={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
           >
             {theme === 'light' ? <Moon className="w-5 h-5" /> : <Sun className="w-5 h-5" />}
@@ -179,7 +193,7 @@ export default function Layout() {
           </button>
           
           {/* User Info & Logout */}
-          <div className="flex items-center justify-between pt-2">
+          <div className={`flex items-center ${sidebarOpen ? 'justify-between' : 'justify-center'} pt-2`}>
             {sidebarOpen && (
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">

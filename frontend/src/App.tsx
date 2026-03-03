@@ -6,6 +6,7 @@ import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Projects from './pages/Projects'
 import ProjectDetail from './pages/ProjectDetail'
+import Sources from './pages/Sources'
 import Repositories from './pages/Repositories'
 import Leads from './pages/Leads'
 import Jobs from './pages/Jobs'
@@ -59,6 +60,7 @@ function App() {
               <Route index element={<Dashboard />} />
               <Route path="projects" element={<Projects />} />
               <Route path="projects/:projectId" element={<ProjectDetail />} />
+              <Route path="sources" element={<Sources />} />
               <Route path="repositories" element={<Repositories />} />
               <Route path="leads" element={<Leads />} />
               <Route path="jobs" element={<Jobs />} />

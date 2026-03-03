@@ -56,24 +56,31 @@ class Project(Base):
     org_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True)
     name = Column(String(255), nullable=False)
     description = Column(Text)
+    sourcing_context = Column(Text)
     is_active = Column(Boolean, default=True)
     auto_export_clay_enabled = Column(Boolean, default=False)
     auto_export_clay_min_score = Column(DECIMAL(5, 2), nullable=True)
     auto_export_clay_classifications = Column(ARRAY(Text), nullable=True)
+    classification_labels = Column(JSON)
+    scoring_weights = Column(JSON)
+    scoring_preset = Column(String(50))
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
-class Repository(Base):
-    """Repository model."""
-    __tablename__ = "repositories"
+class CommunitySource(Base):
+    """Community source model."""
+    __tablename__ = "community_sources"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"))
-    github_url = Column(String(500), nullable=False)
+    source_type = Column(String(50), nullable=False, default='github_repo')
+    external_url = Column(String(500))
+    source_config = Column(JSON)
+    github_url = Column(String(500))
     full_name = Column(String(255), nullable=False)
-    owner = Column(String(255), nullable=False)
-    repo_name = Column(String(255), nullable=False)
+    owner = Column(String(255))
+    repo_name = Column(String(255))
     description = Column(Text)
     stars = Column(Integer, default=0)
     forks = Column(Integer, default=0)
@@ -88,12 +95,13 @@ class Repository(Base):
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
-class Contributor(Base):
-    """Contributor model."""
-    __tablename__ = "contributors"
+class Member(Base):
+    """Member model."""
+    __tablename__ = "members"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    github_id = Column(Integer, unique=True, nullable=False)
+    platform_identities = Column(JSON, default=dict)
+    github_id = Column(Integer, unique=True)
     username = Column(String(255), unique=True, nullable=False)
     full_name = Column(String(255))
     email = Column(String(255))
@@ -111,23 +119,26 @@ class Contributor(Base):
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
-class RepositoryContributor(Base):
-    """Repository-Contributor relationship."""
-    __tablename__ = "repository_contributors"
+class CommunityMember(Base):
+    """Community source ↔ Member relationship."""
+    __tablename__ = "community_members"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    repository_id = Column(UUID(as_uuid=True), ForeignKey("repositories.id", ondelete="CASCADE"))
-    contributor_id = Column(UUID(as_uuid=True), ForeignKey("contributors.id", ondelete="CASCADE"))
+    source_id = Column(UUID(as_uuid=True), ForeignKey("community_sources.id", ondelete="CASCADE"))
+    member_id = Column(UUID(as_uuid=True), ForeignKey("members.id", ondelete="CASCADE"))
+    role = Column(String(50), default='contributor')
     discovered_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
 
-class ContributorStats(Base):
-    """Contributor statistics."""
-    __tablename__ = "contributor_stats"
+class MemberActivity(Base):
+    """Member activity metrics."""
+    __tablename__ = "member_activity"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    repository_id = Column(UUID(as_uuid=True), ForeignKey("repositories.id", ondelete="CASCADE"))
-    contributor_id = Column(UUID(as_uuid=True), ForeignKey("contributors.id", ondelete="CASCADE"))
+    source_id = Column(UUID(as_uuid=True), ForeignKey("community_sources.id", ondelete="CASCADE"))
+    member_id = Column(UUID(as_uuid=True), ForeignKey("members.id", ondelete="CASCADE"))
+    activity_type = Column(String(50), default='commit')
+    details = Column(JSON)
     total_commits = Column(Integer, default=0)
     commits_last_3_months = Column(Integer, default=0)
     commits_last_6_months = Column(Integer, default=0)
@@ -147,11 +158,11 @@ class ContributorStats(Base):
 
 
 class SocialContext(Base):
-    """Social context for contributors."""
+    """Social context for members."""
     __tablename__ = "social_context"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    contributor_id = Column(UUID(as_uuid=True), ForeignKey("contributors.id", ondelete="CASCADE"))
+    member_id = Column(UUID(as_uuid=True), ForeignKey("members.id", ondelete="CASCADE"))
     linkedin_url = Column(String(500))
     linkedin_profile_photo_url = Column(String(500))
     linkedin_headline = Column(Text)
@@ -177,7 +188,7 @@ class LeadScore(Base):
     __tablename__ = "lead_scores"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    contributor_id = Column(UUID(as_uuid=True), ForeignKey("contributors.id", ondelete="CASCADE"))
+    member_id = Column(UUID(as_uuid=True), ForeignKey("members.id", ondelete="CASCADE"))
     project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"))
     overall_score = Column(DECIMAL(5, 2), default=0.00)
     activity_score = Column(DECIMAL(5, 2), default=0.00)
@@ -196,7 +207,7 @@ class SourcingJob(Base):
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"))
-    repository_id = Column(UUID(as_uuid=True), ForeignKey("repositories.id", ondelete="CASCADE"))
+    source_id = Column(UUID(as_uuid=True), ForeignKey("community_sources.id", ondelete="CASCADE"))
     job_type = Column(String(50), nullable=False)
     status = Column(String(50), default="pending")
     total_steps = Column(Integer, default=0)

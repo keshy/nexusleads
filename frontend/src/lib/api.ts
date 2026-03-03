@@ -163,53 +163,74 @@ class ApiClient {
     return response.data
   }
 
-  // Repositories
-  async getRepositories(projectId?: string) {
-    const params = projectId ? { project_id: projectId } : {}
-    const response = await this.client.get('/api/repositories', { params })
+  // Sources (generalized from Repositories)
+  async getSources(projectId?: string, sourceType?: string) {
+    const params: any = {}
+    if (projectId) params.project_id = projectId
+    if (sourceType) params.source_type = sourceType
+    const response = await this.client.get('/api/sources', { params })
     return response.data
   }
 
+  async createSource(data: { project_id: string; external_url: string; source_type?: string; sourcing_interval: string; source_config?: any }) {
+    const response = await this.client.post('/api/sources', data)
+    return response.data
+  }
+
+  async triggerSourcing(sourceId: string) {
+    const response = await this.client.post(`/api/sources/${sourceId}/source-now`)
+    return response.data
+  }
+
+  async analyzeStargazers(sourceId: string) {
+    const response = await this.client.post(`/api/sources/${sourceId}/analyze-stargazers`)
+    return response.data
+  }
+
+  async deleteSource(id: string) {
+    await this.client.delete(`/api/sources/${id}`)
+  }
+
+  async discoverSources(query: string, sourceType: string = 'github_repo', limit: number = 10) {
+    const response = await this.client.post('/api/sources/discover', { query, source_type: sourceType, limit })
+    return response.data
+  }
+
+  // Backward-compat aliases
+  async getRepositories(projectId?: string) { return this.getSources(projectId) }
   async createRepository(data: { project_id: string; github_url: string; sourcing_interval: string }) {
-    const response = await this.client.post('/api/repositories', data)
-    return response.data
+    return this.createSource({ project_id: data.project_id, external_url: data.github_url, source_type: 'github_repo', sourcing_interval: data.sourcing_interval })
   }
+  async deleteRepository(id: string) { return this.deleteSource(id) }
 
-  async triggerSourcing(repositoryId: string) {
-    const response = await this.client.post(`/api/repositories/${repositoryId}/source-now`)
-    return response.data
-  }
-
-  async analyzeStargazers(repositoryId: string) {
-    const response = await this.client.post(`/api/repositories/${repositoryId}/analyze-stargazers`)
-    return response.data
-  }
-
-  async deleteRepository(id: string) {
-    await this.client.delete(`/api/repositories/${id}`)
-  }
-
-  // Contributors
-  async getContributors(params?: {
+  // Members (generalized from Contributors)
+  async getMembers(params?: {
     project_id?: string
-    repository_id?: string
+    source_id?: string
     classification?: string
     qualified_only?: boolean
   }) {
-    const response = await this.client.get('/api/contributors', { params })
+    const response = await this.client.get('/api/members', { params })
     return response.data
   }
 
-  async getContributor(id: string, projectId?: string) {
+  async getMember(id: string, projectId?: string) {
     const params = projectId ? { project_id: projectId } : {}
-    const response = await this.client.get(`/api/contributors/${id}`, { params })
+    const response = await this.client.get(`/api/members/${id}`, { params })
     return response.data
   }
 
-  async enrichContributor(id: string) {
-    const response = await this.client.post(`/api/contributors/${id}/enrich`)
+  async enrichMember(id: string) {
+    const response = await this.client.post(`/api/members/${id}/enrich`)
     return response.data
   }
+
+  // Backward-compat aliases
+  async getContributors(params?: { project_id?: string; repository_id?: string; classification?: string; qualified_only?: boolean }) {
+    return this.getMembers(params ? { ...params, source_id: params.repository_id } : undefined)
+  }
+  async getContributor(id: string, projectId?: string) { return this.getMember(id, projectId) }
+  async enrichContributor(id: string) { return this.enrichMember(id) }
 
   // Jobs
   async getJobs(projectId?: string, repositoryId?: string, statusFilter?: string) {
@@ -242,11 +263,14 @@ class ApiClient {
     return response.data
   }
 
-  async getRepositoryStats(projectId?: string) {
+  async getSourceStats(projectId?: string) {
     const params = projectId ? { project_id: projectId } : {}
-    const response = await this.client.get('/api/dashboard/repositories/stats', { params })
+    const response = await this.client.get('/api/dashboard/sources/stats', { params })
     return response.data
   }
+
+  // Backward-compat alias
+  async getRepositoryStats(projectId?: string) { return this.getSourceStats(projectId) }
 
   async getRecentActivity() {
     const response = await this.client.get('/api/dashboard/recent-activity')
@@ -305,10 +329,9 @@ class ApiClient {
     return response.data
   }
 
-  // Similar repos
+  // Source discovery (was similar repos)
   async searchSimilarRepos(query: string, limit: number = 10) {
-    const response = await this.client.post('/api/repositories/similar', { query, limit })
-    return response.data
+    return this.discoverSources(query, 'github_repo', limit)
   }
 
   // Organizations
@@ -362,9 +385,9 @@ class ApiClient {
     return response.data
   }
 
-  async pushLeadsToClay(contributorIds: string[], projectId?: string) {
+  async pushLeadsToClay(memberIds: string[], projectId?: string) {
     const response = await this.client.post('/api/integrations/clay/push', {
-      contributor_ids: contributorIds,
+      contributor_ids: memberIds,
       project_id: projectId,
     })
     return response.data

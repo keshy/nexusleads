@@ -7,10 +7,10 @@ from sqlalchemy import func
 from database import get_db
 from auth import get_current_active_user
 from org_context import require_org
-from models import User, Project, Repository, LeadScore, SourcingJob, SocialContext, OrgMember
+from models import User, Project, CommunitySource, LeadScore, SourcingJob, SocialContext, OrgMember
 from schemas import (
     ProjectCreate, ProjectUpdate, ProjectResponse, 
-    ProjectWithStats, ProjectStats
+    ProjectWithStats, ProjectStats, SCORING_PRESETS
 )
 
 router = APIRouter()
@@ -24,6 +24,17 @@ async def create_project(
     org_id = Depends(require_org),
 ):
     """Create a new project."""
+    # Resolve scoring preset if specified
+    scoring_weights = None
+    if project_data.scoring_preset and project_data.scoring_preset in SCORING_PRESETS:
+        scoring_weights = SCORING_PRESETS[project_data.scoring_preset]["weights"].model_dump()
+    elif project_data.scoring_weights:
+        scoring_weights = project_data.scoring_weights.model_dump()
+
+    classification_labels = None
+    if project_data.classification_labels:
+        classification_labels = [l.model_dump() for l in project_data.classification_labels]
+
     new_project = Project(
         user_id=current_user.id,
         org_id=org_id,
@@ -31,7 +42,10 @@ async def create_project(
         description=project_data.description,
         tags=project_data.tags,
         external_urls=project_data.external_urls,
-        sourcing_context=project_data.sourcing_context
+        sourcing_context=project_data.sourcing_context,
+        classification_labels=classification_labels,
+        scoring_weights=scoring_weights,
+        scoring_preset=project_data.scoring_preset
     )
     
     db.add(new_project)
@@ -58,22 +72,22 @@ async def list_projects(
     if not project_ids:
         return []
 
-    repo_counts = dict(db.query(
-        Repository.project_id, func.count(Repository.id)
+    source_counts = dict(db.query(
+        CommunitySource.project_id, func.count(CommunitySource.id)
     ).filter(
-        Repository.project_id.in_(project_ids)
-    ).group_by(Repository.project_id).all())
+        CommunitySource.project_id.in_(project_ids)
+    ).group_by(CommunitySource.project_id).all())
 
-    contributor_counts = dict(db.query(
-        LeadScore.project_id, func.count(func.distinct(LeadScore.contributor_id))
+    member_counts = dict(db.query(
+        LeadScore.project_id, func.count(func.distinct(LeadScore.member_id))
     ).filter(
         LeadScore.project_id.in_(project_ids)
     ).group_by(LeadScore.project_id).all())
 
     qualified_counts = dict(db.query(
-        LeadScore.project_id, func.count(func.distinct(SocialContext.contributor_id))
+        LeadScore.project_id, func.count(func.distinct(SocialContext.member_id))
     ).join(
-        SocialContext, SocialContext.contributor_id == LeadScore.contributor_id
+        SocialContext, SocialContext.member_id == LeadScore.member_id
     ).filter(
         LeadScore.project_id.in_(project_ids),
         SocialContext.classification.in_(['DECISION_MAKER', 'HIGH_IMPACT'])
@@ -90,8 +104,8 @@ async def list_projects(
     result = []
     for project in projects:
         stats = ProjectStats(
-            total_repositories=repo_counts.get(project.id, 0),
-            total_contributors=contributor_counts.get(project.id, 0),
+            total_sources=source_counts.get(project.id, 0),
+            total_members=member_counts.get(project.id, 0),
             qualified_leads=qualified_counts.get(project.id, 0),
             active_jobs=active_jobs_counts.get(project.id, 0)
         )
@@ -120,16 +134,16 @@ async def get_project(
         )
     
     # Get stats
-    total_repos = db.query(func.count(Repository.id)).filter(
-        Repository.project_id == project.id
+    total_sources = db.query(func.count(CommunitySource.id)).filter(
+        CommunitySource.project_id == project.id
     ).scalar()
     
-    total_contributors = db.query(func.count(func.distinct(LeadScore.contributor_id))).filter(
+    total_members = db.query(func.count(func.distinct(LeadScore.member_id))).filter(
         LeadScore.project_id == project.id
     ).scalar()
     
-    qualified_leads = db.query(func.count(func.distinct(SocialContext.contributor_id))).join(
-        LeadScore, LeadScore.contributor_id == SocialContext.contributor_id
+    qualified_leads = db.query(func.count(func.distinct(SocialContext.member_id))).join(
+        LeadScore, LeadScore.member_id == SocialContext.member_id
     ).filter(
         LeadScore.project_id == project.id,
         SocialContext.classification.in_(['DECISION_MAKER', 'HIGH_IMPACT'])
@@ -141,8 +155,8 @@ async def get_project(
     ).scalar()
     
     stats = ProjectStats(
-        total_repositories=total_repos or 0,
-        total_contributors=total_contributors or 0,
+        total_sources=total_sources or 0,
+        total_members=total_members or 0,
         qualified_leads=qualified_leads or 0,
         active_jobs=active_jobs or 0
     )
@@ -189,6 +203,14 @@ async def update_project(
         project.auto_export_clay_min_score = project_data.auto_export_clay_min_score
     if project_data.auto_export_clay_classifications is not None:
         project.auto_export_clay_classifications = project_data.auto_export_clay_classifications
+    if project_data.classification_labels is not None:
+        project.classification_labels = [l.model_dump() for l in project_data.classification_labels]
+    if project_data.scoring_weights is not None:
+        project.scoring_weights = project_data.scoring_weights.model_dump()
+    if project_data.scoring_preset is not None:
+        if project_data.scoring_preset in SCORING_PRESETS:
+            project.scoring_weights = SCORING_PRESETS[project_data.scoring_preset]["weights"].model_dump()
+        project.scoring_preset = project_data.scoring_preset
     
     db.commit()
     db.refresh(project)
@@ -215,32 +237,33 @@ async def trigger_project_sourcing(
             detail="Project not found"
         )
     
-    # Get all active repositories for this project
-    repositories = db.query(Repository).filter(
-        Repository.project_id == project_id,
-        Repository.is_active == True
+    # Get all active sources for this project
+    sources = db.query(CommunitySource).filter(
+        CommunitySource.project_id == project_id,
+        CommunitySource.is_active == True
     ).all()
     
-    if not repositories:
+    if not sources:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No active repositories found in this project"
+            detail="No active community sources found in this project"
         )
     
-    # Create sourcing jobs for each repository
+    # Create sourcing jobs for each source
     jobs_created = 0
-    for repo in repositories:
-        # Check if there's already a pending/running job for this repo
+    for src in sources:
+        # Check if there's already a pending/running job for this source
         existing_job = db.query(SourcingJob).filter(
-            SourcingJob.repository_id == repo.id,
+            SourcingJob.source_id == src.id,
             SourcingJob.status.in_(['pending', 'running'])
         ).first()
         
         if not existing_job:
+            job_type = 'repository_sourcing' if src.source_type == 'github_repo' else 'source_ingestion'
             job = SourcingJob(
                 project_id=project_id,
-                repository_id=repo.id,
-                job_type='repository_sourcing',
+                source_id=src.id,
+                job_type=job_type,
                 status='pending',
                 created_by=current_user.id
             )
@@ -251,7 +274,7 @@ async def trigger_project_sourcing(
     
     return {
         "message": f"Created {jobs_created} sourcing job(s)",
-        "total_repositories": len(repositories),
+        "total_sources": len(sources),
         "jobs_created": jobs_created
     }
 

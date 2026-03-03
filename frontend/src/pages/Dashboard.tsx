@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../lib/api'
-import { Users, GitBranch, FolderKanban, Target, ExternalLink, Building2, Factory, Mail, Info, Filter, X, Sparkles, GitCommitHorizontal } from 'lucide-react'
+import { Users, Globe, FolderKanban, Target, ExternalLink, Building2, Factory, Mail, Info, Filter, X, Sparkles, GitCommitHorizontal } from 'lucide-react'
 import ScoreTooltip from '../components/ScoreTooltip'
 import StyledSelect from '../components/StyledSelect'
 import { formatNumber } from '../lib/utils'
@@ -123,8 +123,8 @@ export default function Dashboard() {
 
   const statCards = [
     { name: 'Total Projects', value: stats?.total_projects || 0, icon: FolderKanban, color: 'bg-blue-500' },
-    { name: 'Repositories', value: stats?.total_repositories || 0, icon: GitBranch, color: 'bg-green-500' },
-    { name: 'Contributors', value: stats?.total_contributors || 0, icon: Users, color: 'bg-purple-500' },
+    { name: 'Sources', value: stats?.total_sources || stats?.total_repositories || 0, icon: Globe, color: 'bg-green-500' },
+    { name: 'Members', value: stats?.total_members || stats?.total_contributors || 0, icon: Users, color: 'bg-purple-500' },
     { name: 'Qualified Leads', value: stats?.qualified_leads || 0, icon: Target, color: 'bg-orange-500' },
   ]
 
@@ -140,17 +140,16 @@ export default function Dashboard() {
         {statCards.map((stat) => {
           const Icon = stat.icon
           return (
-            <div key={stat.name} className="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/50 p-6 border border-gray-200 dark:border-gray-700">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400">{stat.name}</p>
-                  <p className="text-3xl font-bold text-gray-900 dark:text-gray-100 mt-2">
-                    {formatNumber(stat.value)}
-                  </p>
-                </div>
-                <div className={`${stat.color} p-3 rounded-lg`}>
+            <div key={stat.name} className="relative overflow-hidden bg-white dark:bg-gray-800 rounded-xl shadow dark:shadow-gray-900/50 p-6 border border-gray-200/80 dark:border-gray-700/80 backdrop-blur-sm">
+              <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-transparent dark:from-white/[0.03] pointer-events-none" />
+              <div className="relative flex flex-col items-center text-center">
+                <div className={`${stat.color} p-3 rounded-xl mb-3 shadow-lg shadow-${stat.color}/20`}>
                   <Icon className="w-6 h-6 text-white" />
                 </div>
+                <p className="text-3xl font-bold text-gray-900 dark:text-gray-100">
+                  {formatNumber(stat.value)}
+                </p>
+                <p className="text-sm font-medium text-gray-500 dark:text-gray-400 mt-1">{stat.name}</p>
               </div>
             </div>
           )

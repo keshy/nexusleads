@@ -45,26 +45,33 @@ class Project(Base):
     auto_export_clay_enabled = Column(Boolean, default=False)
     auto_export_clay_min_score = Column(Integer)
     auto_export_clay_classifications = Column(ARRAY(Text))
+    classification_labels = Column(JSON)  # User-defined classification labels
+    scoring_weights = Column(JSON)  # User-defined scoring weights
+    scoring_preset = Column(String(50))  # Preset name or null for custom
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())
     
     # Relationships
     user = relationship("User", back_populates="projects")
-    repositories = relationship("Repository", back_populates="project", cascade="all, delete-orphan")
+    sources = relationship("CommunitySource", back_populates="project", cascade="all, delete-orphan")
     sourcing_jobs = relationship("SourcingJob", back_populates="project")
     lead_scores = relationship("LeadScore", back_populates="project", cascade="all, delete-orphan")
 
 
-class Repository(Base):
-    """Repository model."""
-    __tablename__ = "repositories"
+class CommunitySource(Base):
+    """Community source model (GitHub repo, Discord server, Reddit sub, etc.)."""
+    __tablename__ = "community_sources"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
-    github_url = Column(String(500), nullable=False)
+    source_type = Column(String(50), nullable=False, default='github_repo')
+    external_url = Column(String(500))
+    source_config = Column(JSON)  # Type-specific config
+    # Legacy GitHub columns kept for backward compat
+    github_url = Column(String(500))
     full_name = Column(String(255), nullable=False)
-    owner = Column(String(255), nullable=False)
-    repo_name = Column(String(255), nullable=False)
+    owner = Column(String(255))
+    repo_name = Column(String(255))
     description = Column(Text)
     stars = Column(Integer, default=0)
     forks = Column(Integer, default=0)
@@ -79,22 +86,24 @@ class Repository(Base):
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())
     
     __table_args__ = (
-        UniqueConstraint('project_id', 'github_url', name='unique_project_repo'),
+        UniqueConstraint('project_id', 'external_url', name='unique_project_source'),
     )
     
     # Relationships
-    project = relationship("Project", back_populates="repositories")
-    repository_contributors = relationship("RepositoryContributor", back_populates="repository", cascade="all, delete-orphan")
-    contributor_stats = relationship("ContributorStats", back_populates="repository", cascade="all, delete-orphan")
-    sourcing_jobs = relationship("SourcingJob", back_populates="repository")
+    project = relationship("Project", back_populates="sources")
+    community_members = relationship("CommunityMember", back_populates="source", cascade="all, delete-orphan")
+    member_activity = relationship("MemberActivity", back_populates="source", cascade="all, delete-orphan")
+    sourcing_jobs = relationship("SourcingJob", back_populates="source")
 
 
-class Contributor(Base):
-    """Contributor model (GitHub users)."""
-    __tablename__ = "contributors"
+class Member(Base):
+    """Member model (community participants across all platforms)."""
+    __tablename__ = "members"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    github_id = Column(Integer, unique=True, nullable=False, index=True)
+    platform_identities = Column(JSON, default=dict)  # {github: {id, url, username}, discord: {id, username}, ...}
+    # Legacy GitHub columns kept for backward compat
+    github_id = Column(Integer, unique=True, index=True)
     username = Column(String(255), unique=True, nullable=False, index=True)
     full_name = Column(String(255))
     email = Column(String(255))
@@ -112,37 +121,41 @@ class Contributor(Base):
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())
     
     # Relationships
-    repository_contributors = relationship("RepositoryContributor", back_populates="contributor")
-    contributor_stats = relationship("ContributorStats", back_populates="contributor")
-    social_context = relationship("SocialContext", back_populates="contributor", uselist=False)
-    lead_scores = relationship("LeadScore", back_populates="contributor")
+    community_memberships = relationship("CommunityMember", back_populates="member")
+    activity = relationship("MemberActivity", back_populates="member")
+    social_context = relationship("SocialContext", back_populates="member", uselist=False)
+    lead_scores = relationship("LeadScore", back_populates="member")
 
 
-class RepositoryContributor(Base):
-    """Repository-Contributor relationship."""
-    __tablename__ = "repository_contributors"
+class CommunityMember(Base):
+    """Community source ↔ Member relationship."""
+    __tablename__ = "community_members"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    repository_id = Column(UUID(as_uuid=True), ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False)
-    contributor_id = Column(UUID(as_uuid=True), ForeignKey("contributors.id", ondelete="CASCADE"), nullable=False)
+    source_id = Column(UUID(as_uuid=True), ForeignKey("community_sources.id", ondelete="CASCADE"), nullable=False)
+    member_id = Column(UUID(as_uuid=True), ForeignKey("members.id", ondelete="CASCADE"), nullable=False)
+    role = Column(String(50), default='contributor')  # owner, moderator, contributor, member, lurker
     discovered_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     
     __table_args__ = (
-        UniqueConstraint('repository_id', 'contributor_id', name='unique_repo_contributor'),
+        UniqueConstraint('source_id', 'member_id', name='unique_source_member'),
     )
     
     # Relationships
-    repository = relationship("Repository", back_populates="repository_contributors")
-    contributor = relationship("Contributor", back_populates="repository_contributors")
+    source = relationship("CommunitySource", back_populates="community_members")
+    member = relationship("Member", back_populates="community_memberships")
 
 
-class ContributorStats(Base):
-    """Contributor statistics."""
-    __tablename__ = "contributor_stats"
+class MemberActivity(Base):
+    """Member activity metrics (per source)."""
+    __tablename__ = "member_activity"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    repository_id = Column(UUID(as_uuid=True), ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False)
-    contributor_id = Column(UUID(as_uuid=True), ForeignKey("contributors.id", ondelete="CASCADE"), nullable=False)
+    source_id = Column(UUID(as_uuid=True), ForeignKey("community_sources.id", ondelete="CASCADE"), nullable=False)
+    member_id = Column(UUID(as_uuid=True), ForeignKey("members.id", ondelete="CASCADE"), nullable=False)
+    activity_type = Column(String(50), default='commit')  # commit, message, post, tweet, etc.
+    details = Column(JSON)  # Platform-specific activity details
+    # Legacy GitHub columns kept for backward compat
     total_commits = Column(Integer, default=0)
     commits_last_3_months = Column(Integer, default=0)
     commits_last_6_months = Column(Integer, default=0)
@@ -161,20 +174,20 @@ class ContributorStats(Base):
     calculated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     
     __table_args__ = (
-        UniqueConstraint('repository_id', 'contributor_id', name='unique_repo_contributor_stats'),
+        UniqueConstraint('source_id', 'member_id', name='unique_source_member_activity'),
     )
     
     # Relationships
-    repository = relationship("Repository", back_populates="contributor_stats")
-    contributor = relationship("Contributor", back_populates="contributor_stats")
+    source = relationship("CommunitySource", back_populates="member_activity")
+    member = relationship("Member", back_populates="activity")
 
 
 class SocialContext(Base):
-    """Social context for contributors."""
+    """Social context for members."""
     __tablename__ = "social_context"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    contributor_id = Column(UUID(as_uuid=True), ForeignKey("contributors.id", ondelete="CASCADE"), nullable=False, unique=True)
+    member_id = Column(UUID(as_uuid=True), ForeignKey("members.id", ondelete="CASCADE"), nullable=False, unique=True)
     linkedin_url = Column(String(500))
     linkedin_profile_photo_url = Column(String(500))
     linkedin_headline = Column(Text)
@@ -195,7 +208,7 @@ class SocialContext(Base):
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())
     
     # Relationships
-    contributor = relationship("Contributor", back_populates="social_context")
+    member = relationship("Member", back_populates="social_context")
 
 
 class SourcingJob(Base):
@@ -204,7 +217,7 @@ class SourcingJob(Base):
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"))
-    repository_id = Column(UUID(as_uuid=True), ForeignKey("repositories.id", ondelete="CASCADE"))
+    source_id = Column(UUID(as_uuid=True), ForeignKey("community_sources.id", ondelete="CASCADE"))
     job_type = Column(String(50), nullable=False)
     status = Column(String(50), default="pending")
     total_steps = Column(Integer, default=0)
@@ -220,7 +233,7 @@ class SourcingJob(Base):
     
     # Relationships
     project = relationship("Project", back_populates="sourcing_jobs")
-    repository = relationship("Repository", back_populates="sourcing_jobs")
+    source = relationship("CommunitySource", back_populates="sourcing_jobs")
     progress_steps = relationship("JobProgress", back_populates="job", cascade="all, delete-orphan")
 
 
@@ -325,7 +338,7 @@ class ClayPushLog(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     org_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
     job_id = Column(UUID(as_uuid=True), ForeignKey("sourcing_jobs.id", ondelete="CASCADE"), nullable=False)
-    contributor_id = Column(UUID(as_uuid=True), ForeignKey("contributors.id", ondelete="CASCADE"), nullable=False)
+    member_id = Column(UUID(as_uuid=True), ForeignKey("members.id", ondelete="CASCADE"), nullable=False)
     project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     status = Column(String(50), nullable=False)  # 'success', 'failed', 'skipped'
     error_message = Column(Text)
@@ -368,7 +381,7 @@ class CreditTransaction(Base):
     description = Column(Text)
     stripe_session_id = Column(String(255))
     job_id = Column(UUID(as_uuid=True), ForeignKey("sourcing_jobs.id", ondelete="SET NULL"))
-    contributor_id = Column(UUID(as_uuid=True), ForeignKey("contributors.id", ondelete="SET NULL"))
+    member_id = Column(UUID(as_uuid=True), ForeignKey("members.id", ondelete="SET NULL"))
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
 
@@ -379,7 +392,7 @@ class UsageEvent(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     org_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
     job_id = Column(UUID(as_uuid=True), ForeignKey("sourcing_jobs.id", ondelete="CASCADE"), nullable=False)
-    contributor_id = Column(UUID(as_uuid=True), ForeignKey("contributors.id", ondelete="CASCADE"), nullable=False)
+    member_id = Column(UUID(as_uuid=True), ForeignKey("members.id", ondelete="CASCADE"), nullable=False)
     event_type = Column(String(50), nullable=False, default='enrichment')
     cost = Column(DECIMAL(10, 4), nullable=False)
     is_byok = Column(Boolean, default=False)
@@ -403,7 +416,7 @@ class LeadScore(Base):
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
-    contributor_id = Column(UUID(as_uuid=True), ForeignKey("contributors.id", ondelete="CASCADE"), nullable=False)
+    member_id = Column(UUID(as_uuid=True), ForeignKey("members.id", ondelete="CASCADE"), nullable=False)
     overall_score = Column(DECIMAL(5, 2), default=0.00)
     activity_score = Column(DECIMAL(5, 2), default=0.00)
     influence_score = Column(DECIMAL(5, 2), default=0.00)
@@ -415,9 +428,9 @@ class LeadScore(Base):
     calculated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     
     __table_args__ = (
-        UniqueConstraint('project_id', 'contributor_id', name='unique_project_contributor_score'),
+        UniqueConstraint('project_id', 'member_id', name='unique_project_member_score'),
     )
     
     # Relationships
     project = relationship("Project", back_populates="lead_scores")
-    contributor = relationship("Contributor", back_populates="lead_scores")
+    member = relationship("Member", back_populates="lead_scores")

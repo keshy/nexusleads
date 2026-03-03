@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { FolderKanban, Plus, GitBranch, Target, X, Trash2, ExternalLink, Tag, Play } from 'lucide-react'
+import { FolderKanban, Plus, Globe, Target, X, Trash2, ExternalLink, Tag, Play } from 'lucide-react'
 import { api } from '../lib/api'
 import Toast from '../components/Toast'
 import ConfirmDialog from '../components/ConfirmDialog'
@@ -13,15 +13,18 @@ interface Project {
   external_urls?: string[]
   sourcing_context?: string
   stats: {
-    total_repositories: number
-    total_contributors: number
+    total_sources?: number
+    total_members?: number
+    total_repositories?: number
+    total_contributors?: number
     qualified_leads: number
     active_jobs: number
   }
 }
 
-interface RepoForm {
-  github_url: string
+interface SourceForm {
+  external_url: string
+  source_type: string
   sourcing_interval: 'daily' | 'weekly' | 'monthly'
 }
 
@@ -39,7 +42,7 @@ export default function Projects() {
     external_urls: '',
     sourcing_context: ''
   })
-  const [repositories, setRepositories] = useState<RepoForm[]>([])
+  const [sources, setSources] = useState<SourceForm[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'warning' | 'info' } | null>(null)
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
@@ -75,24 +78,25 @@ export default function Projects() {
       
       const newProject = await api.createProject(projectData)
       
-      // Create repositories if any were added
-      if (repositories.length > 0) {
-        for (const repo of repositories) {
+      // Create sources if any were added
+      if (sources.length > 0) {
+        for (const src of sources) {
           try {
-            await api.createRepository({
+            await api.createSource({
               project_id: newProject.id,
-              github_url: repo.github_url,
-              sourcing_interval: repo.sourcing_interval
+              external_url: src.external_url,
+              source_type: src.source_type,
+              sourcing_interval: src.sourcing_interval
             })
-          } catch (repoError) {
-            console.error('Error creating repository:', repoError)
+          } catch (srcError) {
+            console.error('Error creating source:', srcError)
           }
         }
       }
       
       setShowCreateModal(false)
       setFormData({ name: '', description: '', tags: '', external_urls: '', sourcing_context: '' })
-      setRepositories([])
+      setSources([])
       fetchProjects()
       setToast({ message: 'Project created successfully!', type: 'success' })
     } catch (error: any) {
@@ -103,18 +107,18 @@ export default function Projects() {
     }
   }
 
-  const addRepository = () => {
-    setRepositories([...repositories, { github_url: '', sourcing_interval: 'weekly' }])
+  const addSource = () => {
+    setSources([...sources, { external_url: '', source_type: 'github_repo', sourcing_interval: 'weekly' }])
   }
 
-  const removeRepository = (index: number) => {
-    setRepositories(repositories.filter((_, i) => i !== index))
+  const removeSource = (index: number) => {
+    setSources(sources.filter((_, i) => i !== index))
   }
 
-  const updateRepository = (index: number, field: keyof RepoForm, value: string) => {
-    const updated = [...repositories]
+  const updateSource = (index: number, field: keyof SourceForm, value: string) => {
+    const updated = [...sources]
     updated[index] = { ...updated[index], [field]: value }
-    setRepositories(updated)
+    setSources(updated)
   }
 
   const openProjectDetail = async (project: Project) => {
@@ -127,11 +131,13 @@ export default function Projects() {
       const result = await api.triggerProjectSourcing(id)
       
       if (result.jobs_created === 0) {
-        setToast({ message: `All ${result.total_repositories} repositories are already being sourced. Check the Jobs page for progress.`, type: 'info' })
-      } else if (result.jobs_created === result.total_repositories) {
-        setToast({ message: `Started sourcing ${result.jobs_created} repositories! Check the Jobs page for progress.`, type: 'success' })
+        const total = result.total_sources || result.total_repositories || 0
+        setToast({ message: `All ${total} sources are already being scanned. Check the Jobs page for progress.`, type: 'info' })
+      } else if (result.jobs_created === (result.total_sources || result.total_repositories)) {
+        setToast({ message: `Started scanning ${result.jobs_created} sources! Check the Jobs page for progress.`, type: 'success' })
       } else {
-        setToast({ message: `Started sourcing ${result.jobs_created} of ${result.total_repositories} repositories. ${result.total_repositories - result.jobs_created} already in progress.`, type: 'info' })
+        const total = result.total_sources || result.total_repositories || 0
+        setToast({ message: `Scanning ${result.jobs_created} of ${total} sources. ${total - result.jobs_created} already in progress.`, type: 'info' })
       }
       
       setShowDetailDrawer(false)
@@ -168,7 +174,7 @@ export default function Projects() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Projects</h1>
-          <p className="text-gray-600 dark:text-gray-400 mt-2">Organize repositories into projects to track and source leads by campaign or product area</p>
+          <p className="text-gray-600 dark:text-gray-400 mt-2">Organize community sources into projects to track and source leads by campaign or product area</p>
         </div>
         <button
           onClick={() => setShowCreateModal(true)}
@@ -188,7 +194,7 @@ export default function Projects() {
             Create Your First Project
           </h3>
           <p className="text-gray-600 dark:text-gray-400 text-center max-w-2xl mb-8 leading-relaxed">
-            Projects help you organize your lead sourcing efforts. Each project can contain multiple GitHub repositories,
+            Projects help you organize your lead sourcing efforts. Each project can contain multiple community sources,
             custom URLs, tags, and specific sourcing criteria to find the right leads for your business.
           </p>
           <div className="grid md:grid-cols-3 gap-6 max-w-4xl mb-8">
@@ -196,14 +202,14 @@ export default function Projects() {
               <FolderKanban className="w-10 h-10 text-blue-600 dark:text-blue-400 mb-3" />
               <h4 className="font-semibold text-gray-900 dark:text-gray-100 mb-2">Organize Sources</h4>
               <p className="text-sm text-gray-600 dark:text-gray-400">
-                Group related repositories and sources together by project or campaign
+                Group related community sources together by project or campaign
               </p>
             </div>
             <div className="bg-white dark:bg-gray-800 p-6 rounded-lg border border-gray-200 dark:border-gray-700">
-              <GitBranch className="w-10 h-10 text-green-600 dark:text-green-400 mb-3" />
-              <h4 className="font-semibold text-gray-900 dark:text-gray-100 mb-2">Track Repositories</h4>
+              <Globe className="w-10 h-10 text-green-600 dark:text-green-400 mb-3" />
+              <h4 className="font-semibold text-gray-900 dark:text-gray-100 mb-2">Track Sources</h4>
               <p className="text-sm text-gray-600 dark:text-gray-400">
-                Add GitHub repos, external URLs, and custom tags to each project
+                Add GitHub repos, Discord servers, Reddit communities, and more to each project
               </p>
             </div>
             <div className="bg-white dark:bg-gray-800 p-6 rounded-lg border border-gray-200 dark:border-gray-700">
@@ -227,28 +233,27 @@ export default function Projects() {
           {projects.map((project) => (
             <div
               key={project.id}
-              className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6 hover:shadow-lg dark:hover:shadow-gray-900/50 transition-shadow"
+              className="relative overflow-hidden bg-white dark:bg-gray-800 rounded-xl border border-gray-200/80 dark:border-gray-700/80 p-6 hover:shadow-lg dark:hover:shadow-gray-900/50 transition-shadow flex flex-col"
             >
-              <div className="flex items-start justify-between mb-4">
+              {/* Header — fixed height */}
+              <div className="flex items-start justify-between mb-3">
                 <div 
-                  className="flex items-center space-x-3 flex-1 cursor-pointer"
+                  className="flex items-center space-x-3 flex-1 min-w-0 cursor-pointer"
                   onClick={() => openProjectDetail(project)}
                 >
-                  <div className="bg-blue-100 dark:bg-blue-900/30 p-2 rounded-lg">
+                  <div className="bg-blue-100 dark:bg-blue-900/30 p-2 rounded-lg flex-shrink-0">
                     <FolderKanban className="w-6 h-6 text-blue-600 dark:text-blue-400" />
                   </div>
-                  <div>
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{project.name}</h3>
-                  </div>
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 truncate">{project.name}</h3>
                 </div>
-                <div className="flex space-x-2">
+                <div className="flex space-x-1 flex-shrink-0 ml-2">
                   <button
                     onClick={(e) => {
                       e.stopPropagation()
                       handleSourceProject(project.id)
                     }}
-                    className="p-1 hover:bg-green-100 dark:hover:bg-green-900/30 rounded"
-                    title="Source all repositories"
+                    className="p-1.5 hover:bg-green-100 dark:hover:bg-green-900/30 rounded"
+                    title="Scan all"
                   >
                     <Play className="w-4 h-4 text-green-600 dark:text-green-400" />
                   </button>
@@ -257,7 +262,7 @@ export default function Projects() {
                       e.stopPropagation()
                       setDeleteConfirmId(project.id)
                     }}
-                    className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
+                    className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
                     title="Delete project"
                   >
                     <Trash2 className="w-4 h-4 text-red-600 dark:text-red-400" />
@@ -270,7 +275,7 @@ export default function Projects() {
                 <div onClick={(e) => e.stopPropagation()}>
                   <ConfirmDialog
                     title="Delete Project"
-                    message="Are you sure you want to delete this project? This will also delete all associated repositories and data."
+                    message="Are you sure you want to delete this project? This will also delete all associated sources and data."
                     onConfirm={() => handleDelete(project.id)}
                     onCancel={() => setDeleteConfirmId(null)}
                     confirmText="Yes, Delete Project"
@@ -278,35 +283,39 @@ export default function Projects() {
                 </div>
               )}
 
-              <div onClick={() => openProjectDetail(project)} className="cursor-pointer">
-                {project.description && (
-                  <p className="text-sm text-gray-600 dark:text-gray-400 mb-4 line-clamp-2">{project.description}</p>
-                )}
-              </div>
+              {/* Body — flex-grow to push stats to bottom */}
+              <div onClick={() => openProjectDetail(project)} className="cursor-pointer flex-1 flex flex-col">
+                {/* Description — fixed 2-line slot */}
+                <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2 min-h-[2.5rem] mb-3">
+                  {project.description || '\u00A0'}
+                </p>
 
-              <div onClick={() => openProjectDetail(project)} className="cursor-pointer">
-                {project.tags && project.tags.length > 0 && (
-                  <div className="flex flex-wrap gap-2 mb-4">
-                    {project.tags.slice(0, 3).map((tag, idx) => (
-                      <span key={idx} className="inline-flex items-center px-2 py-1 text-xs font-medium rounded-full bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200">
-                        <Tag className="w-3 h-3 mr-1" />
-                        {tag}
-                      </span>
-                    ))}
-                    {project.tags.length > 3 && (
-                      <span className="text-xs text-gray-500">+{project.tags.length - 3} more</span>
-                    )}
-                  </div>
-                )}
+                {/* Tags — fixed single-row slot */}
+                <div className="h-7 mb-3 overflow-hidden">
+                  {project.tags && project.tags.length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {project.tags.slice(0, 3).map((tag, idx) => (
+                        <span key={idx} className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 truncate max-w-[7rem]">
+                          <Tag className="w-3 h-3 mr-1 flex-shrink-0" />
+                          <span className="truncate">{tag}</span>
+                        </span>
+                      ))}
+                      {project.tags.length > 3 && (
+                        <span className="text-xs text-gray-500 leading-6">+{project.tags.length - 3}</span>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
 
-                <div className="grid grid-cols-2 gap-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-                  <div>
-                    <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">{project.stats.total_repositories}</div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400">Repositories</div>
+                {/* Stats — always pinned to bottom */}
+                <div className="grid grid-cols-2 gap-4 pt-3 mt-auto border-t border-gray-200 dark:border-gray-700">
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">{project.stats.total_sources ?? project.stats.total_repositories ?? 0}</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Sources</div>
                   </div>
-                  <div>
+                  <div className="text-center">
                     <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">{project.stats.qualified_leads}</div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400">Qualified Leads</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Qualified Leads</div>
                   </div>
                 </div>
               </div>
@@ -402,32 +411,32 @@ export default function Projects() {
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Repositories
+                    Sources
                   </label>
                   <button
                     type="button"
-                    onClick={addRepository}
+                    onClick={addSource}
                     className="text-sm text-primary hover:text-primary/80 inline-flex items-center"
                   >
                     <Plus className="w-4 h-4 mr-1" />
-                    Add Repository
+                    Add Source
                   </button>
                 </div>
                 <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-                  Add GitHub repositories to this project for lead sourcing
+                  Add community sources to this project for lead sourcing
                 </p>
-                {repositories.map((repo, index) => (
+                {sources.map((src, index) => (
                   <div key={index} className="flex gap-2 mb-2 items-start">
                     <input
                       type="url"
-                      value={repo.github_url}
-                      onChange={(e) => updateRepository(index, 'github_url', e.target.value)}
+                      value={src.external_url}
+                      onChange={(e) => updateSource(index, 'external_url', e.target.value)}
                       className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 text-sm"
                       placeholder="https://github.com/owner/repo"
                     />
                     <select
-                      value={repo.sourcing_interval}
-                      onChange={(e) => updateRepository(index, 'sourcing_interval', e.target.value)}
+                      value={src.sourcing_interval}
+                      onChange={(e) => updateSource(index, 'sourcing_interval', e.target.value)}
                       className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 text-sm"
                     >
                       <option value="daily">Daily</option>
@@ -436,7 +445,7 @@ export default function Projects() {
                     </select>
                     <button
                       type="button"
-                      onClick={() => removeRepository(index)}
+                      onClick={() => removeSource(index)}
                       className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
                     >
                       <Trash2 className="w-4 h-4 text-red-600 dark:text-red-400" />
@@ -450,7 +459,7 @@ export default function Projects() {
                   type="button"
                   onClick={() => {
                     setShowCreateModal(false)
-                    setRepositories([])
+                    setSources([])
                   }}
                   className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700"
                 >
@@ -533,22 +542,22 @@ export default function Projects() {
                 </div>
               )}
 
-              <div className="grid grid-cols-2 gap-4 mb-6 p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
-                <div>
-                  <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">{selectedProject.stats.total_repositories}</div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">Repositories</div>
+              <div className="grid grid-cols-2 gap-4 mb-6 p-4 bg-gray-50 dark:bg-gray-900 rounded-xl">
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">{selectedProject.stats.total_sources ?? selectedProject.stats.total_repositories ?? 0}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Sources</div>
                 </div>
-                <div>
+                <div className="text-center">
                   <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">{selectedProject.stats.qualified_leads}</div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">Qualified Leads</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Qualified Leads</div>
                 </div>
-                <div>
-                  <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">{selectedProject.stats.total_contributors}</div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">Contributors</div>
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">{selectedProject.stats.total_members ?? selectedProject.stats.total_contributors ?? 0}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Members</div>
                 </div>
-                <div>
+                <div className="text-center">
                   <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">{selectedProject.stats.active_jobs}</div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">Active Jobs</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Active Jobs</div>
                 </div>
               </div>
 
@@ -569,19 +578,19 @@ export default function Projects() {
                   className="w-full px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg inline-flex items-center justify-center"
                 >
                   <Play className="w-5 h-5 mr-2" />
-                  Source All Repositories Now
+                  Scan All Now
                 </button>
                 
                 <div className="flex space-x-3">
                   <button
                     onClick={() => {
                       setShowDetailDrawer(false)
-                      navigate(`/app/repositories?project_id=${selectedProject.id}`)
+                      navigate(`/app/sources?project_id=${selectedProject.id}`)
                     }}
                     className="flex-1 px-4 py-2 bg-primary hover:bg-primary/90 text-white rounded-lg inline-flex items-center justify-center"
                   >
-                    <GitBranch className="w-5 h-5 mr-2" />
-                    View Repositories
+                    <Globe className="w-5 h-5 mr-2" />
+                    View Sources
                   </button>
                   {!showDrawerDeleteConfirm && (
                     <button

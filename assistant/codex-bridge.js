@@ -101,8 +101,8 @@ async function handleChat(ws, msg) {
       : '';
 
     const prompt = [
-      'You are a helpful AI assistant for PLG Lead Sourcer (NexusLeads).',
-      'Use the $plg-database skill to query the PostgreSQL database via psql when the user asks about projects, repositories, leads, contributors, jobs, settings, or dashboard stats.',
+      'You are a helpful AI assistant for NexusLeads (community-to-revenue platform).',
+      'Use the $plg-database skill to query the PostgreSQL database via psql when the user asks about projects, community sources, leads, members, jobs, settings, or dashboard stats.',
       '',
       'RESPONSE FORMATS — pick the right one:',
       '',

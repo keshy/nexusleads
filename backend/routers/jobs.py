@@ -8,7 +8,7 @@ from sqlalchemy import and_, desc
 from database import get_db
 from auth import get_current_active_user
 from org_context import require_org
-from models import User, SourcingJob, JobProgress, Project, Repository
+from models import User, SourcingJob, JobProgress, Project, CommunitySource
 from schemas import SourcingJobResponse, SourcingJobWithProgress, JobProgressResponse
 
 router = APIRouter()
@@ -29,8 +29,8 @@ async def list_jobs(
     query = db.query(
         SourcingJob,
         Project.name.label("project_name"),
-        Repository.full_name.label("repository_name")
-    ).outerjoin(Project, SourcingJob.project_id == Project.id).outerjoin(Repository, SourcingJob.repository_id == Repository.id)
+        CommunitySource.full_name.label("source_name")
+    ).outerjoin(Project, SourcingJob.project_id == Project.id).outerjoin(CommunitySource, SourcingJob.source_id == CommunitySource.id)
     
     # Filter by project
     if project_id:
@@ -59,9 +59,9 @@ async def list_jobs(
         else:
             query = query.filter(SourcingJob.project_id.is_(None))
     
-    # Filter by repository
+    # Filter by source
     if repository_id:
-        query = query.filter(SourcingJob.repository_id == repository_id)
+        query = query.filter(SourcingJob.source_id == repository_id)
     
     # Filter by status
     if status_filter:
@@ -70,13 +70,13 @@ async def list_jobs(
     # Order by creation date
     jobs = query.order_by(desc(SourcingJob.created_at)).offset(skip).limit(limit).all()
     
-    # Enrich with project and repository names
+    # Enrich with project and source names
     result = []
-    for job, project_name, repository_name in jobs:
+    for job, project_name, source_name in jobs:
         job_dict = {
             "id": job.id,
             "project_id": job.project_id,
-            "repository_id": job.repository_id,
+            "source_id": job.source_id,
             "job_type": job.job_type,
             "status": job.status,
             "total_steps": job.total_steps,
@@ -88,7 +88,7 @@ async def list_jobs(
             "job_metadata": job.job_metadata,
             "created_at": job.created_at,
             "project_name": project_name,
-            "repository_name": repository_name
+            "source_name": source_name
         }
 
         result.append(SourcingJobResponse(**job_dict))

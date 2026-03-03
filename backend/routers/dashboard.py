@@ -9,10 +9,10 @@ from database import get_db
 from auth import get_current_active_user
 from org_context import require_org
 from models import (
-    User, Project, Repository, Contributor, LeadScore, 
-    SocialContext, SourcingJob, ContributorStats
+    User, Project, CommunitySource, Member, LeadScore, 
+    SocialContext, SourcingJob, MemberActivity, CommunityMember
 )
-from schemas import DashboardStats, RepositoryLeadStats
+from schemas import DashboardStats, SourceLeadStats
 
 router = APIRouter()
 
@@ -31,60 +31,78 @@ async def get_dashboard_stats(
         Project.is_active == True
     ).scalar() or 0
     
-    # Total repositories
-    total_repositories = db.query(func.count(Repository.id)).join(Project).filter(
+    # Total sources
+    total_sources = db.query(func.count(CommunitySource.id)).join(
+        Project, CommunitySource.project_id == Project.id
+    ).filter(
         Project.org_id == org_id,
-        Repository.is_active == True
+        CommunitySource.is_active == True
     ).scalar() or 0
     
-    # Total contributors (unique across all projects)
-    total_contributors = db.query(func.count(func.distinct(LeadScore.contributor_id))).join(Project).filter(
+    # Total members (unique across all projects)
+    total_members = db.query(func.count(func.distinct(LeadScore.member_id))).join(
+        Project, LeadScore.project_id == Project.id
+    ).filter(
         Project.org_id == org_id
     ).scalar() or 0
     
     # Qualified leads (classified as DECISION_MAKER, KEY_CONTRIBUTOR, or HIGH_IMPACT)
-    qualified_leads = db.query(func.count(func.distinct(SocialContext.contributor_id))).join(
-        LeadScore, LeadScore.contributor_id == SocialContext.contributor_id
-    ).join(Project).filter(
+    qualified_leads = db.query(func.count(func.distinct(SocialContext.member_id))).join(
+        LeadScore, LeadScore.member_id == SocialContext.member_id
+    ).join(
+        Project, LeadScore.project_id == Project.id
+    ).filter(
         Project.org_id == org_id,
         SocialContext.classification.in_(['DECISION_MAKER', 'HIGH_IMPACT'])
     ).scalar() or 0
     
     # Get classification counts
     decision_makers = db.query(func.count(SocialContext.id)).join(
-        LeadScore, LeadScore.contributor_id == SocialContext.contributor_id
-    ).join(Project).filter(
+        LeadScore, LeadScore.member_id == SocialContext.member_id
+    ).join(
+        Project, LeadScore.project_id == Project.id
+    ).filter(
         Project.org_id == org_id,
         SocialContext.classification == 'DECISION_MAKER'
     ).scalar() or 0
     
     key_contributors = db.query(func.count(SocialContext.id)).join(
-        LeadScore, LeadScore.contributor_id == SocialContext.contributor_id
-    ).join(Project).filter(
+        LeadScore, LeadScore.member_id == SocialContext.member_id
+    ).join(
+        Project, LeadScore.project_id == Project.id
+    ).filter(
         Project.org_id == org_id,
         SocialContext.classification == 'KEY_CONTRIBUTOR'
     ).scalar() or 0
     
     high_impact = db.query(func.count(SocialContext.id)).join(
-        LeadScore, LeadScore.contributor_id == SocialContext.contributor_id
-    ).join(Project).filter(
+        LeadScore, LeadScore.member_id == SocialContext.member_id
+    ).join(
+        Project, LeadScore.project_id == Project.id
+    ).filter(
         Project.org_id == org_id,
         SocialContext.classification == 'HIGH_IMPACT'
     ).scalar() or 0
     
     # Job statistics
-    active_jobs = db.query(func.count(SourcingJob.id)).join(Project).filter(
+    active_jobs = db.query(func.count(SourcingJob.id)).join(
+        Project, SourcingJob.project_id == Project.id
+    ).filter(
         Project.org_id == org_id,
         SourcingJob.status.in_(['pending', 'running'])
     ).scalar() or 0
     
-    pending_jobs = db.query(func.count(SourcingJob.id)).join(Project).filter(
+    pending_jobs = db.query(func.count(SourcingJob.id)).join(
+        Project, SourcingJob.project_id == Project.id
+    ).filter(
         Project.org_id == org_id,
         SourcingJob.status == 'pending'
     ).scalar() or 0
     
     today = datetime.utcnow().date()
-    completed_jobs_today = db.query(func.count(SourcingJob.id)).join(Project).filter(
+    completed_jobs_today = db.query(func.count(SourcingJob.id)).join(
+        Project, SourcingJob.project_id == Project.id
+    ).filter(
         Project.org_id == org_id,
         SourcingJob.status == 'completed',
         func.date(SourcingJob.completed_at) == today
@@ -92,8 +110,8 @@ async def get_dashboard_stats(
     
     return DashboardStats(
         total_projects=total_projects,
-        total_repositories=total_repositories,
-        total_contributors=total_contributors,
+        total_sources=total_sources,
+        total_members=total_members,
         qualified_leads=qualified_leads,
         decision_makers=decision_makers,
         key_contributors=key_contributors,
@@ -104,69 +122,72 @@ async def get_dashboard_stats(
     )
 
 
-@router.get("/repositories/stats", response_model=List[RepositoryLeadStats])
-async def get_repository_stats(
+@router.get("/sources/stats", response_model=List[SourceLeadStats])
+async def get_source_stats(
     project_id: UUID = None,
     limit: int = 10,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
     org_id = Depends(require_org),
 ):
-    """Get lead statistics by repository."""
+    """Get lead statistics by community source."""
     
     # Build query
-    query = db.query(Repository).join(Project).filter(
+    query = db.query(CommunitySource).join(
+        Project, CommunitySource.project_id == Project.id
+    ).filter(
         Project.org_id == org_id,
-        Repository.is_active == True
+        CommunitySource.is_active == True
     )
     
     if project_id:
-        query = query.filter(Repository.project_id == project_id)
+        query = query.filter(CommunitySource.project_id == project_id)
     
-    repositories = query.order_by(desc(Repository.stars)).limit(limit).all()
+    sources = query.order_by(desc(CommunitySource.stars)).limit(limit).all()
     
     result = []
-    for repo in repositories:
-        # Total contributors for this repo
-        total_contributors = db.query(func.count(func.distinct(ContributorStats.contributor_id))).filter(
-            ContributorStats.repository_id == repo.id
+    for src in sources:
+        # Total members for this source
+        total_members = db.query(func.count(func.distinct(MemberActivity.member_id))).filter(
+            MemberActivity.source_id == src.id
         ).scalar() or 0
         
         # Get qualified leads through project
-        qualified_leads = db.query(func.count(func.distinct(LeadScore.contributor_id))).join(
-            ContributorStats, LeadScore.contributor_id == ContributorStats.contributor_id
+        qualified_leads = db.query(func.count(func.distinct(LeadScore.member_id))).join(
+            MemberActivity, LeadScore.member_id == MemberActivity.member_id
         ).filter(
-            ContributorStats.repository_id == repo.id,
-            LeadScore.project_id == repo.project_id,
+            MemberActivity.source_id == src.id,
+            LeadScore.project_id == src.project_id,
             LeadScore.is_qualified_lead == True
         ).scalar() or 0
         
         # Classification counts
-        decision_makers = db.query(func.count(func.distinct(SocialContext.contributor_id))).join(
-            ContributorStats, SocialContext.contributor_id == ContributorStats.contributor_id
+        decision_makers = db.query(func.count(func.distinct(SocialContext.member_id))).join(
+            MemberActivity, SocialContext.member_id == MemberActivity.member_id
         ).filter(
-            ContributorStats.repository_id == repo.id,
+            MemberActivity.source_id == src.id,
             SocialContext.classification == 'DECISION_MAKER'
         ).scalar() or 0
         
-        key_contributors_count = db.query(func.count(func.distinct(SocialContext.contributor_id))).join(
-            ContributorStats, SocialContext.contributor_id == ContributorStats.contributor_id
+        key_contributors_count = db.query(func.count(func.distinct(SocialContext.member_id))).join(
+            MemberActivity, SocialContext.member_id == MemberActivity.member_id
         ).filter(
-            ContributorStats.repository_id == repo.id,
+            MemberActivity.source_id == src.id,
             SocialContext.classification == 'KEY_CONTRIBUTOR'
         ).scalar() or 0
         
-        high_impact_count = db.query(func.count(func.distinct(SocialContext.contributor_id))).join(
-            ContributorStats, SocialContext.contributor_id == ContributorStats.contributor_id
+        high_impact_count = db.query(func.count(func.distinct(SocialContext.member_id))).join(
+            MemberActivity, SocialContext.member_id == MemberActivity.member_id
         ).filter(
-            ContributorStats.repository_id == repo.id,
+            MemberActivity.source_id == src.id,
             SocialContext.classification == 'HIGH_IMPACT'
         ).scalar() or 0
         
-        result.append(RepositoryLeadStats(
-            repository_id=repo.id,
-            repository_name=repo.full_name,
-            total_contributors=total_contributors,
+        result.append(SourceLeadStats(
+            source_id=src.id,
+            source_name=src.full_name,
+            source_type=src.source_type,
+            total_members=total_members,
             qualified_leads=qualified_leads,
             decision_makers=decision_makers,
             key_contributors=key_contributors_count,
@@ -186,7 +207,9 @@ async def get_recent_activity(
     """Get recent activity feed."""
     
     # Get recent jobs
-    recent_jobs = db.query(SourcingJob).join(Project).filter(
+    recent_jobs = db.query(SourcingJob).join(
+        Project, SourcingJob.project_id == Project.id
+    ).filter(
         Project.org_id == org_id
     ).order_by(desc(SourcingJob.created_at)).limit(limit).all()
     
@@ -199,13 +222,14 @@ async def get_recent_activity(
             "timestamp": job.created_at.isoformat(),
             "progress": float(job.progress_percentage),
             "project_id": str(job.project_id) if job.project_id else None,
-            "repository_id": str(job.repository_id) if job.repository_id else None
+            "source_id": str(job.source_id) if job.source_id else None
         }
         
-        if job.repository_id:
-            repo = db.query(Repository).filter(Repository.id == job.repository_id).first()
-            if repo:
-                activity["repository_name"] = repo.full_name
+        if job.source_id:
+            src = db.query(CommunitySource).filter(CommunitySource.id == job.source_id).first()
+            if src:
+                activity["source_name"] = src.full_name
+                activity["source_type"] = src.source_type
         
         activities.append(activity)
     
@@ -223,10 +247,27 @@ async def get_top_leads(
 ):
     """Get top leads by score across all projects."""
     
-    query = db.query(LeadScore, Contributor, SocialContext, Project.name).join(
-        Contributor, LeadScore.contributor_id == Contributor.id
+    # Subquery: best LeadScore per member (highest overall_score) to deduplicate
+    best_score_sq = db.query(
+        LeadScore.member_id,
+        func.max(LeadScore.overall_score).label("max_score")
     ).join(
-        SocialContext, SocialContext.contributor_id == Contributor.id
+        Project, LeadScore.project_id == Project.id
+    ).filter(
+        Project.org_id == org_id
+    )
+    if project_id:
+        best_score_sq = best_score_sq.filter(LeadScore.project_id == project_id)
+    best_score_sq = best_score_sq.group_by(LeadScore.member_id).subquery()
+
+    query = db.query(LeadScore, Member, SocialContext, Project.name).join(
+        best_score_sq,
+        (LeadScore.member_id == best_score_sq.c.member_id) &
+        (LeadScore.overall_score == best_score_sq.c.max_score)
+    ).join(
+        Member, LeadScore.member_id == Member.id
+    ).join(
+        SocialContext, SocialContext.member_id == Member.id
     ).join(
         Project, LeadScore.project_id == Project.id
     ).filter(
@@ -239,9 +280,11 @@ async def get_top_leads(
 
     if source:
         query = query.filter(
-            Contributor.id.in_(
-                db.query(ContributorStats.contributor_id).join(Repository).filter(
-                    ContributorStats.source == source
+            Member.id.in_(
+                db.query(CommunityMember.member_id).join(
+                    CommunitySource, CommunityMember.source_id == CommunitySource.id
+                ).filter(
+                    CommunityMember.role == source
                 )
             )
         )
@@ -249,15 +292,15 @@ async def get_top_leads(
     results = query.order_by(desc(LeadScore.overall_score)).limit(limit).all()
     
     leads = []
-    for lead_score, contributor, social_context, project_name in results:
+    for lead_score, member, social_context, project_name in results:
         lead = {
             "id": str(lead_score.id),
-            "username": contributor.username,
-            "full_name": contributor.full_name,
-            "company": contributor.company,
-            "bio": contributor.bio,
-            "avatar_url": contributor.avatar_url,
-            "email": contributor.email,
+            "username": member.username,
+            "full_name": member.full_name,
+            "company": member.company,
+            "bio": member.bio,
+            "avatar_url": member.avatar_url,
+            "email": member.email,
             "overall_score": float(lead_score.overall_score) if lead_score.overall_score else 0,
             "activity_score": float(lead_score.activity_score) if lead_score.activity_score else 0,
             "influence_score": float(lead_score.influence_score) if lead_score.influence_score else 0,
@@ -268,13 +311,15 @@ async def get_top_leads(
             "classification": social_context.classification if social_context else None,
             "classification_reasoning": social_context.classification_reasoning if social_context else None,
             "current_position": social_context.current_position if social_context else None,
-            "current_company": social_context.current_company if social_context else contributor.company,
+            "current_company": social_context.current_company if social_context else member.company,
             "industry": social_context.industry if social_context else None,
             "linkedin_url": social_context.linkedin_url if social_context else None,
             "linkedin_profile_photo_url": social_context.linkedin_profile_photo_url if social_context else None,
-            "source": (db.query(ContributorStats.source).join(Repository).filter(
-                Repository.project_id == lead_score.project_id,
-                ContributorStats.contributor_id == contributor.id
+            "source": (db.query(CommunityMember.role).join(
+                CommunitySource, CommunityMember.source_id == CommunitySource.id
+            ).filter(
+                CommunitySource.project_id == lead_score.project_id,
+                CommunityMember.member_id == member.id
             ).first() or ('commit',))[0],
         }
         leads.append(lead)
