@@ -1,14 +1,21 @@
 """Social enrichment service for contributors."""
+import asyncio
 import logging
 import json
+import time
 from typing import Dict, Any, Optional
 import httpx
 from openai import AzureOpenAI, OpenAI
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from config import config
 from services.linkedin_service import linkedin_service
 
 logger = logging.getLogger(__name__)
+
+# Module-level rate limiter for SerpAPI: only one search at a time with delay
+_serpapi_lock = asyncio.Lock()
+_serpapi_last_call: float = 0.0
+SERPAPI_MIN_INTERVAL = 1.5  # seconds between SerpAPI calls
 
 
 class EnrichmentService:
@@ -56,9 +63,14 @@ class EnrichmentService:
             
         self.linkedin_service = linkedin_service
     
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=2, min=5, max=30),
+        retry=retry_if_exception_type(httpx.HTTPStatusError),
+    )
     async def search_person(self, name: str, company: Optional[str] = None, username: Optional[str] = None) -> Dict[str, Any]:
         """Search for a person on the web (LinkedIn, etc.) using SerpAPI."""
+        global _serpapi_last_call
         if not self.serpapi_key:
             logger.warning("SerpAPI key not configured")
             return {"results": []}
@@ -74,18 +86,26 @@ class EnrichmentService:
         query = " ".join(query_parts)
         
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    "https://serpapi.com/search",
-                    params={
-                        "q": query,
-                        "api_key": self.serpapi_key,
-                        "engine": "google",
-                        "num": 5
-                    },
-                    timeout=30.0
-                )
-                response.raise_for_status()
+            # Rate-limit: serialize SerpAPI calls with minimum interval
+            async with _serpapi_lock:
+                elapsed = time.monotonic() - _serpapi_last_call
+                if elapsed < SERPAPI_MIN_INTERVAL:
+                    await asyncio.sleep(SERPAPI_MIN_INTERVAL - elapsed)
+
+                async with httpx.AsyncClient() as client:
+                    response = await client.get(
+                        "https://serpapi.com/search",
+                        params={
+                            "q": query,
+                            "api_key": self.serpapi_key,
+                            "engine": "google",
+                            "num": 5
+                        },
+                        timeout=30.0
+                    )
+                    _serpapi_last_call = time.monotonic()
+                    response.raise_for_status()
+
                 data = response.json()
                 # Normalize SerpAPI response to match the format extract_linkedin_info expects
                 # SerpAPI uses "organic_results" with "title", "link", "snippet", "thumbnail"
@@ -101,6 +121,12 @@ class EnrichmentService:
                     ]
                 }
                 return normalized
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 429:
+                logger.warning(f"SerpAPI rate limited for '{name}', will retry...")
+                raise  # let @retry handle it
+            logger.error(f"Error searching for {name}: {e}")
+            return {"results": []}
         except Exception as e:
             logger.error(f"Error searching for {name}: {e}")
             return {"results": []}
