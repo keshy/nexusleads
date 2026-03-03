@@ -330,15 +330,15 @@ export default function Leads() {
             <StyledSelect
               value={filterCompany}
               onChange={setFilterCompany}
-              placeholder="All Organizations"
-              options={[{ value: '', label: 'All Organizations' }, ...companies.map(comp => ({ value: comp, label: comp }))]}
+              placeholder="All Companies"
+              options={[{ value: '', label: 'All Companies' }, ...companies.map(comp => ({ value: comp, label: comp }))]}
             />
             <StyledSelect
               value={filterSource}
               onChange={setFilterSource}
-              placeholder="All Sources"
+              placeholder="All Lead Types"
               options={[
-                { value: '', label: 'All Sources' },
+                { value: '', label: 'All Lead Types' },
                 { value: 'commit', label: 'Contributors' },
                 { value: 'stargazer', label: 'Stargazers' },
               ]}

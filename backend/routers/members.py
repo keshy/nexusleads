@@ -101,11 +101,11 @@ async def get_leads_by_project(
         if source:
             leads_query = leads_query.filter(
                 Member.id.in_(
-                    db.query(CommunityMember.member_id).join(
-                        CommunitySource, CommunityMember.source_id == CommunitySource.id
+                    db.query(MemberActivity.member_id).join(
+                        CommunitySource, MemberActivity.source_id == CommunitySource.id
                     ).filter(
                         CommunitySource.project_id == project.id,
-                        CommunityMember.role == source
+                        MemberActivity.source == source
                     )
                 )
             )
@@ -116,13 +116,13 @@ async def get_leads_by_project(
         
         # Helper to get source for a member in this project's sources
         def get_source(member_id):
-            cm = db.query(CommunityMember.role).join(
-                CommunitySource, CommunityMember.source_id == CommunitySource.id
+            ma = db.query(MemberActivity.source).join(
+                CommunitySource, MemberActivity.source_id == CommunitySource.id
             ).filter(
                 CommunitySource.project_id == project.id,
-                CommunityMember.member_id == member_id
+                MemberActivity.member_id == member_id
             ).first()
-            return cm[0] if cm else 'contributor'
+            return ma[0] if ma else 'contributor'
 
         # Helper to check if a member was pushed to Clay
         def get_clay_pushed_at(member_id):
