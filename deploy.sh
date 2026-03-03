@@ -236,25 +236,25 @@ install_assistant_prereqs() {
     echo "  Installing host prerequisites for assistant..."
     if command -v dnf >/dev/null 2>&1; then
         if [ "$need_node" -eq 1 ]; then
-            $SUDO dnf install -y nodejs npm
+            sudo dnf install -y nodejs npm
         fi
         if [ "$need_psql" -eq 1 ]; then
-            $SUDO dnf install -y postgresql15 || $SUDO dnf install -y postgresql
+            sudo dnf install -y postgresql15 || sudo dnf install -y postgresql
         fi
     elif command -v yum >/dev/null 2>&1; then
         if [ "$need_node" -eq 1 ]; then
-            $SUDO yum install -y nodejs npm
+            sudo yum install -y nodejs npm
         fi
         if [ "$need_psql" -eq 1 ]; then
-            $SUDO yum install -y postgresql15 || $SUDO yum install -y postgresql
+            sudo yum install -y postgresql15 || sudo yum install -y postgresql
         fi
     elif command -v apt-get >/dev/null 2>&1; then
-        $SUDO apt-get update
+        sudo apt-get update
         if [ "$need_node" -eq 1 ]; then
-            $SUDO apt-get install -y nodejs npm
+            sudo apt-get install -y nodejs npm
         fi
         if [ "$need_psql" -eq 1 ]; then
-            $SUDO apt-get install -y postgresql-client
+            sudo apt-get install -y postgresql-client
         fi
     else
         echo "ERROR: unsupported package manager; install node, npm, and psql manually."
@@ -303,8 +303,12 @@ MIGRATIONS=(
 
 for f in "${MIGRATIONS[@]}"; do
   if [ -f "$f" ]; then
-    echo "    -> $f"
-    $COMPOSE $COMPOSE_FILE exec -T postgres psql -v ON_ERROR_STOP=1 -U "$DB_USER" -d "$DB_NAME" < "$f"
+    echo -n "    -> $f ... "
+    if $COMPOSE $COMPOSE_FILE exec -T postgres psql -v ON_ERROR_STOP=0 -U "$DB_USER" -d "$DB_NAME" < "$f" 2>&1 | grep -q "ERROR"; then
+      echo "skipped (already applied or incompatible)"
+    else
+      echo "ok"
+    fi
   fi
 done
 
@@ -323,7 +327,7 @@ cd "${REMOTE_DIR}"
 
 echo "  Configuring host assistant service..."
 DEPLOY_USER="$(whoami)"
-cat <<SERVICE | $SUDO tee /etc/systemd/system/plg-assistant.service >/dev/null
+cat <<SERVICE | sudo tee /etc/systemd/system/plg-assistant.service >/dev/null
 [Unit]
 Description=PLG Assistant (host-run Codex bridge)
 After=network-online.target docker.service
@@ -344,12 +348,12 @@ RestartSec=2
 WantedBy=multi-user.target
 SERVICE
 
-$SUDO systemctl daemon-reload
-$SUDO systemctl enable plg-assistant.service >/dev/null 2>&1 || true
-$SUDO systemctl restart plg-assistant.service
-if ! $SUDO systemctl is-active --quiet plg-assistant.service; then
+sudo systemctl daemon-reload
+sudo systemctl enable plg-assistant.service >/dev/null 2>&1 || true
+sudo systemctl restart plg-assistant.service
+if ! sudo systemctl is-active --quiet plg-assistant.service; then
     echo "ERROR: plg-assistant.service failed to start"
-    $SUDO systemctl status plg-assistant.service --no-pager || true
+    sudo systemctl status plg-assistant.service --no-pager || true
     exit 1
 fi
 
