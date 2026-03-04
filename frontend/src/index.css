@@ -69,6 +69,12 @@ body.chat-open main {
   }
 }
 
+.chat-markdown {
+  overflow-wrap: break-word;
+  word-break: break-word;
+  min-width: 0;
+}
+
 .chat-markdown h2 {
   font-size: 1.05rem;
   font-weight: 600;

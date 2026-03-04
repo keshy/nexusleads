@@ -1,13 +1,20 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronDown, ChevronRight, ExternalLink, Mail, Building2, UserCheck, FolderKanban, Info, Filter, Factory, X, Sparkles, GitCommitHorizontal, Send, Download, Loader2, Cloud, Blocks } from 'lucide-react'
+import { ChevronDown, ChevronRight, ExternalLink, Mail, Building2, UserCheck, FolderKanban, Info, Filter, Factory, X, Sparkles, GitCommitHorizontal, Send, Download, Loader2, Cloud, UserPlus } from 'lucide-react'
 import Toast from '../components/Toast'
 import ScoreTooltip from '../components/ScoreTooltip'
 import StyledSelect from '../components/StyledSelect'
 import { api } from '../lib/api'
 
+interface OrgUser {
+  id: string
+  username: string
+  full_name?: string
+}
+
 interface Lead {
   id: string
+  lead_score_id?: string
   full_name: string
   username: string
   email?: string
@@ -28,6 +35,7 @@ interface Lead {
   engagement_score: number
   source?: string
   clay_pushed_at?: string
+  owner_id?: string | null
 }
 
 interface Project {
@@ -36,6 +44,7 @@ interface Project {
   description?: string
   leads: Lead[]
   contributors: Lead[]
+  owners?: Record<string, OrgUser>
 }
 
 export default function Leads() {
@@ -54,11 +63,32 @@ export default function Leads() {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'warning' | 'info' } | null>(null)
   const [clayConfigured, setClayConfigured] = useState<boolean | null>(null)
   const [showPushConfirm, setShowPushConfirm] = useState(false)
+  const [orgUsers, setOrgUsers] = useState<OrgUser[]>([])
+  const [assigningOwner, setAssigningOwner] = useState(false)
+  const [ownerDropdownId, setOwnerDropdownId] = useState<string | null>(null)
+  const ownerDropdownRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     fetchLeadsByProject()
     api.getClayConfig().then((c: any) => setClayConfigured(c?.connected || false)).catch(() => setClayConfigured(false))
+    const orgId = localStorage.getItem('activeOrgId')
+    if (orgId) {
+      api.getOrgMembers(orgId).then((members: any[]) => {
+        setOrgUsers(members.map((m: any) => ({ id: m.user_id, username: m.username, full_name: m.full_name })))
+      }).catch(() => {})
+    }
   }, [filterSource])
+
+  // Close owner dropdown on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ownerDropdownRef.current && !ownerDropdownRef.current.contains(e.target as Node)) {
+        setOwnerDropdownId(null)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
 
   const fetchLeadsByProject = async () => {
     try {
@@ -142,6 +172,38 @@ export default function Leads() {
     }
   }
 
+  const handleAssignOwner = async (leadScoreId: string, ownerId: string | null) => {
+    try {
+      await api.assignLeadOwner([leadScoreId], ownerId)
+      setOwnerDropdownId(null)
+      fetchLeadsByProject()
+      setToast({ message: ownerId ? 'Owner assigned' : 'Owner removed', type: 'success' })
+    } catch {
+      setToast({ message: 'Failed to assign owner', type: 'error' })
+    }
+  }
+
+  const handleBulkAssignOwner = async (ownerId: string | null) => {
+    if (selectedLeads.size === 0) return
+    setAssigningOwner(true)
+    try {
+      const leadScoreIds = allLeads.filter(l => selectedLeads.has(l.id) && l.lead_score_id).map(l => l.lead_score_id!)
+      await api.assignLeadOwner(leadScoreIds, ownerId)
+      setSelectedLeads(new Set())
+      fetchLeadsByProject()
+      setToast({ message: `Assigned owner to ${leadScoreIds.length} leads`, type: 'success' })
+    } catch {
+      setToast({ message: 'Failed to bulk assign owner', type: 'error' })
+    } finally {
+      setAssigningOwner(false)
+    }
+  }
+
+  const getOwnerForLead = (lead: Lead, project: Project): OrgUser | null => {
+    if (!lead.owner_id || !project.owners) return null
+    return project.owners[lead.owner_id] || null
+  }
+
   const handleExportCSV = () => {
     const selected = allLeads.filter(l => selectedLeads.has(l.id))
     if (selected.length === 0) return
@@ -160,6 +222,26 @@ export default function Leads() {
     a.click()
     URL.revokeObjectURL(url)
     setToast({ message: `Exported ${selected.length} leads to CSV`, type: 'success' })
+  }
+
+  const handleExportProjectCSV = (project: Project) => {
+    const leads = filterLeads(project.leads)
+    if (leads.length === 0) return
+    const headers = ['Name', 'Username', 'Email', 'Company', 'Position', 'Industry', 'Classification', 'Score', 'LinkedIn', 'GitHub']
+    const rows = leads.map(l => [
+      l.full_name || '', l.username, l.email || '', l.current_company || l.company || '',
+      l.current_position || '', l.industry || '', l.classification || '',
+      l.overall_score?.toFixed(0) || '', l.linkedin_url || '', `https://github.com/${l.username}`
+    ])
+    const csv = [headers, ...rows].map(r => r.map(c => `"${(c || '').replace(/"/g, '""')}"`).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${project.name.replace(/\s+/g, '-').toLowerCase()}-leads-${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+    setToast({ message: `Exported ${leads.length} leads from ${project.name}`, type: 'success' })
   }
 
   const toggleReasoning = (leadId: string) => {
@@ -256,6 +338,37 @@ export default function Leads() {
         <div className="sticky top-0 z-20 bg-gradient-to-r from-cyan-600 to-violet-600 text-white rounded-lg px-5 py-3 flex items-center justify-between shadow-lg">
           <span className="text-sm font-medium">{selectedLeads.size} lead{selectedLeads.size !== 1 ? 's' : ''} selected</span>
           <div className="flex items-center gap-2">
+            {/* Bulk Assign Owner */}
+            <div className="relative" ref={ownerDropdownId === '__bulk__' ? ownerDropdownRef : undefined}>
+              <button
+                onClick={() => setOwnerDropdownId(ownerDropdownId === '__bulk__' ? null : '__bulk__')}
+                disabled={assigningOwner}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white/20 hover:bg-white/30 rounded-lg text-sm font-medium disabled:opacity-50"
+              >
+                <UserPlus className="w-4 h-4" />
+                {assigningOwner ? 'Assigning...' : 'Assign Owner'}
+              </button>
+              {ownerDropdownId === '__bulk__' && (
+                <div className="absolute z-30 top-full mt-1 right-0 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl py-1 min-w-[180px] backdrop-blur-sm">
+                  <button
+                    onClick={() => { handleBulkAssignOwner(null); setOwnerDropdownId(null) }}
+                    className="w-full text-left px-3 py-2 text-xs text-red-600 dark:text-red-400 hover:bg-gray-50 dark:hover:bg-gray-700"
+                  >
+                    Remove Owner
+                  </button>
+                  <div className="border-t border-gray-100 dark:border-gray-700 my-1" />
+                  {orgUsers.map(u => (
+                    <button
+                      key={u.id}
+                      onClick={() => { handleBulkAssignOwner(u.id); setOwnerDropdownId(null) }}
+                      className="w-full text-left px-3 py-2 text-xs text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+                    >
+                      {u.full_name || u.username}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <button
               onClick={handleBulkPushClay}
               disabled={pushing}
@@ -279,19 +392,6 @@ export default function Leads() {
               <X className="w-4 h-4" />
             </button>
           </div>
-        </div>
-      )}
-
-      {/* No integrations banner */}
-      {clayConfigured === false && projects.length > 0 && (
-        <div className="bg-gradient-to-r from-cyan-900/20 to-violet-900/20 border border-cyan-500/20 rounded-lg px-5 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-2 text-sm text-gray-300">
-            <Blocks className="w-4 h-4 text-cyan-400" />
-            Connect an integration to push leads directly to your sales tools
-          </div>
-          <Link to="/app/integrations" className="text-xs text-cyan-400 hover:text-cyan-300 font-medium">
-            Set up Integrations
-          </Link>
         </div>
       )}
 
@@ -427,9 +527,18 @@ export default function Leads() {
                       </div>
                     </button>
                   </div>
-                  <span className="px-3 py-1 bg-primary text-white text-sm font-medium rounded-full">
-                    {filterLeads(project.leads).length} {filterLeads(project.leads).length === 1 ? 'Lead' : 'Leads'}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleExportProjectCSV(project) }}
+                      className="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                      title={`Download ${project.name} leads as CSV`}
+                    >
+                      <Download className="w-4 h-4" />
+                    </button>
+                    <span className="px-3 py-1 bg-primary text-white text-sm font-medium rounded-full">
+                      {filterLeads(project.leads).length} {filterLeads(project.leads).length === 1 ? 'Lead' : 'Leads'}
+                    </span>
+                  </div>
                 </div>
 
                 {/* Leads List */}
@@ -481,6 +590,49 @@ export default function Leads() {
                                   size="md"
                                 />
                               )}
+                              {/* Owner pill / assign */}
+                              {(() => {
+                                const owner = getOwnerForLead(lead, project)
+                                return (
+                                  <div className="relative" ref={ownerDropdownId === lead.id ? ownerDropdownRef : undefined}>
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); setOwnerDropdownId(ownerDropdownId === lead.id ? null : lead.id) }}
+                                      className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full transition-colors ${
+                                        owner
+                                          ? 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-200 dark:hover:bg-indigo-900/60'
+                                          : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
+                                      }`}
+                                      title={owner ? `Owned by ${owner.full_name || owner.username}` : 'Assign owner'}
+                                    >
+                                      <UserPlus className="w-3 h-3" />
+                                      {owner ? (owner.full_name || owner.username) : 'Assign'}
+                                    </button>
+                                    {ownerDropdownId === lead.id && lead.lead_score_id && (
+                                      <div className="absolute z-30 top-full mt-1 left-0 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg py-1 min-w-[160px]">
+                                        {owner && (
+                                          <button
+                                            onClick={() => handleAssignOwner(lead.lead_score_id!, null)}
+                                            className="w-full text-left px-3 py-1.5 text-xs text-red-600 dark:text-red-400 hover:bg-gray-50 dark:hover:bg-gray-700"
+                                          >
+                                            Remove owner
+                                          </button>
+                                        )}
+                                        {orgUsers.map(u => (
+                                          <button
+                                            key={u.id}
+                                            onClick={() => handleAssignOwner(lead.lead_score_id!, u.id)}
+                                            className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-50 dark:hover:bg-gray-700 ${
+                                              lead.owner_id === u.id ? 'text-indigo-600 dark:text-indigo-400 font-medium' : 'text-gray-700 dark:text-gray-300'
+                                            }`}
+                                          >
+                                            {u.full_name || u.username}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                )
+                              })()}
                             </div>
 
                             <div className="flex flex-wrap gap-3 text-sm text-gray-600 dark:text-gray-400">
@@ -525,24 +677,24 @@ export default function Leads() {
 
                             {/* Links + Push to Clay */}
                             <div className="flex items-center gap-2 mt-2">
+                              <a
+                                href={`https://github.com/${lead.username}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center px-2.5 py-1 text-xs font-medium text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                              >
+                                GitHub <ExternalLink className="w-3 h-3 ml-1" />
+                              </a>
                               {lead.linkedin_url && (
                                 <a
                                   href={lead.linkedin_url}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="inline-flex items-center px-3 py-1 text-sm text-blue-600 dark:text-blue-400 hover:underline"
+                                  className="inline-flex items-center px-2.5 py-1 text-xs font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 rounded-md hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
                                 >
                                   LinkedIn <ExternalLink className="w-3 h-3 ml-1" />
                                 </a>
                               )}
-                              <a
-                                href={`https://github.com/${lead.username}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center px-3 py-1 text-sm text-blue-600 dark:text-blue-400 hover:underline"
-                              >
-                                GitHub <ExternalLink className="w-3 h-3 ml-1" />
-                              </a>
                               {clayConfigured && !lead.clay_pushed_at && (
                                 <button
                                   onClick={() => handleSinglePushClay(lead.id)}

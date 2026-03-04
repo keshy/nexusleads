@@ -177,13 +177,13 @@ class ApiClient {
     return response.data
   }
 
-  async triggerSourcing(sourceId: string) {
-    const response = await this.client.post(`/api/sources/${sourceId}/source-now`)
+  async triggerSourcing(sourceId: string, sampleSize?: number) {
+    const response = await this.client.post(`/api/sources/${sourceId}/source-now`, sampleSize ? { sample_size: sampleSize } : undefined)
     return response.data
   }
 
-  async analyzeStargazers(sourceId: string) {
-    const response = await this.client.post(`/api/sources/${sourceId}/analyze-stargazers`)
+  async analyzeStargazers(sourceId: string, sampleSize?: number) {
+    const response = await this.client.post(`/api/sources/${sourceId}/analyze-stargazers`, sampleSize ? { sample_size: sampleSize } : undefined)
     return response.data
   }
 
@@ -310,6 +310,14 @@ class ApiClient {
     const params: Record<string, string> = {}
     if (source) params.source = source
     const response = await this.client.get('/api/leads/by-project', { params })
+    return response.data
+  }
+
+  async assignLeadOwner(leadScoreIds: string[], ownerId: string | null) {
+    const response = await this.client.post('/api/leads/assign-owner', {
+      lead_score_ids: leadScoreIds,
+      owner_id: ownerId,
+    })
     return response.data
   }
 

@@ -125,6 +125,33 @@ MANAGED_SETTINGS = [
         "placeholder": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     },
     {
+        "key": "CONTRIBUTOR_SCAN_LIMIT",
+        "description": "Maximum number of contributors to fetch per source scan.",
+        "is_secret": False,
+        "hint": "Controls how many contributors are fetched when scanning a GitHub repo. Higher values take longer but find more leads. Default: 100.",
+        "help_url": "",
+        "required": False,
+        "placeholder": "100",
+    },
+    {
+        "key": "STARGAZER_SCAN_LIMIT",
+        "description": "Maximum number of stargazers to fetch per stargazer analysis.",
+        "is_secret": False,
+        "hint": "Controls how many stargazers are fetched when running stargazer analysis. Higher values take longer but find more leads. Default: 200.",
+        "help_url": "",
+        "required": False,
+        "placeholder": "200",
+    },
+    {
+        "key": "EXCLUDED_ORGANIZATIONS",
+        "description": "Comma-separated list of organization domains to exclude from leads (e.g. your own company).",
+        "is_secret": False,
+        "hint": "Leads whose company or email matches these domains will be hidden from the Leads and Dashboard pages. Use domain format (e.g. cisco.com, google.com).",
+        "help_url": "",
+        "required": False,
+        "placeholder": "cisco.com",
+    },
+    {
         "key": "CLAY_WEBHOOK_URL",
         "description": "Clay table webhook URL for pushing enriched leads.",
         "is_secret": False,
@@ -262,6 +289,14 @@ def delete_org_setting(db: Session, org_id, key: str):
         OrgSetting.key == key,
     ).delete()
     db.commit()
+
+
+def get_excluded_organizations(db: Session, org_id) -> list[str]:
+    """Get list of excluded organization domains for an org."""
+    raw = get_setting(db, "EXCLUDED_ORGANIZATIONS", "", org_id=org_id)
+    if not raw:
+        return []
+    return [d.strip().lower() for d in raw.split(",") if d.strip()]
 
 
 def get_user_org_id(db: Session, user_id):

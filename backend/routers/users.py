@@ -1,11 +1,12 @@
 """Users management router."""
 from typing import List
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
 from database import get_db
 from auth import get_current_active_user, get_password_hash
-from models import User
+from org_context import require_org
+from models import User, OrgMember
 from schemas import UserResponse, UserCreate, UserUpdate
 
 router = APIRouter()
@@ -37,9 +38,10 @@ async def list_users(
 async def create_user(
     user_data: UserCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin)
+    current_user: User = Depends(require_admin),
+    org_id = Depends(require_org),
 ):
-    """Create a new user (admin only)."""
+    """Create a new user (admin only). Auto-adds to the admin's current org."""
     # Check if username exists
     if db.query(User).filter(User.username == user_data.username).first():
         raise HTTPException(
@@ -65,6 +67,10 @@ async def create_user(
     )
     
     db.add(new_user)
+    db.flush()
+
+    # Auto-add to admin's current org
+    db.add(OrgMember(org_id=org_id, user_id=new_user.id, role='member'))
     db.commit()
     db.refresh(new_user)
     

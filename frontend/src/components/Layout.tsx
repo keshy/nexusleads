@@ -17,7 +17,7 @@ import {
   ChevronsUpDown,
   Wallet,
 } from 'lucide-react'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import MatrixBackground from './MatrixBackground'
 import NexusLogo from './NexusLogo'
 import ChatSidecar from './ChatSidecar'
@@ -103,21 +103,46 @@ export default function Layout() {
         {activeOrg && sidebarOpen && (
           <div className="px-3 pt-3">
             {orgs.length > 1 ? (
-              <div className="relative">
-                <select
-                  value={activeOrgId || ''}
-                  onChange={(e) => {
-                    localStorage.setItem('activeOrgId', e.target.value)
-                    window.location.reload()
-                  }}
-                  className="w-full appearance-none bg-gray-100 dark:bg-gray-700/60 border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 pr-8 text-sm text-gray-900 dark:text-gray-100 cursor-pointer"
-                >
-                  {orgs.map((o: any) => (
-                    <option key={o.id} value={o.id}>{o.name}</option>
-                  ))}
-                </select>
-                <ChevronsUpDown className="w-4 h-4 absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-              </div>
+              (() => {
+                const [orgOpen, setOrgOpen] = useState(false)
+                const orgRef = useRef<HTMLDivElement>(null)
+                useEffect(() => {
+                  const h = (e: MouseEvent) => { if (orgRef.current && !orgRef.current.contains(e.target as Node)) setOrgOpen(false) }
+                  document.addEventListener('mousedown', h)
+                  return () => document.removeEventListener('mousedown', h)
+                }, [])
+                return (
+                  <div ref={orgRef} className="relative">
+                    <button
+                      onClick={() => setOrgOpen(!orgOpen)}
+                      className="w-full flex items-center justify-between gap-2 px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-white/80 dark:bg-gray-800/80 text-gray-700 dark:text-gray-300 hover:border-cyan-500/60 dark:hover:border-cyan-400/50 transition-all backdrop-blur-sm"
+                    >
+                      <div className="flex items-center gap-2 truncate">
+                        <Building2 className="w-4 h-4 flex-shrink-0" />
+                        <span className="truncate">{activeOrg.name}</span>
+                      </div>
+                      <ChevronsUpDown className={`w-3.5 h-3.5 flex-shrink-0 transition-transform ${orgOpen ? 'rotate-180' : ''}`} />
+                    </button>
+                    {orgOpen && (
+                      <div className="absolute z-[9999] mt-1 w-full py-1 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-xl backdrop-blur-sm overflow-hidden">
+                        {orgs.map((o: any) => (
+                          <button
+                            key={o.id}
+                            onClick={() => { localStorage.setItem('activeOrgId', o.id); window.location.reload() }}
+                            className={`w-full flex items-center justify-between px-3 py-2 text-sm transition-colors ${
+                              o.id === activeOrgId
+                                ? 'bg-cyan-50 dark:bg-cyan-900/20 text-cyan-700 dark:text-cyan-300'
+                                : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                            }`}
+                          >
+                            <span className="truncate">{o.name}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })()
             ) : (
               <div className="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 dark:text-gray-400">
                 <Building2 className="w-4 h-4" />

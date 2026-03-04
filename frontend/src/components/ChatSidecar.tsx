@@ -883,7 +883,7 @@ export default function ChatSidecar() {
 
     return (
       <div key={msg.id} className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
-        <div className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm shadow-sm ${bubbleClasses}`}>
+        <div className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm shadow-sm overflow-hidden ${bubbleClasses}`}>
           {msg.actions && msg.actions.length > 0 && (
             <ThinkingSection steps={msg.actions} messageId={msg.id} isComplete={msg.text !== ''} />
           )}

@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../lib/api'
-import { ExternalLink, Globe, Play, Tag, Trash2, Users, Send, Save } from 'lucide-react'
+import { ExternalLink, Globe, Play, Tag, Trash2, Users, Send, Save, ChevronDown, FlaskConical, Sparkles } from 'lucide-react'
 import Toast from '../components/Toast'
 import ConfirmDialog from '../components/ConfirmDialog'
 
@@ -62,6 +62,16 @@ export default function ProjectDetail() {
   const [clayMinScore, setClayMinScore] = useState('')
   const [clayClassifications, setClayClassifications] = useState<string[]>([])
   const [savingClay, setSavingClay] = useState(false)
+  const [actionDropdownId, setActionDropdownId] = useState<string | null>(null)
+  const actionDropdownRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (actionDropdownRef.current && !actionDropdownRef.current.contains(e.target as Node)) setActionDropdownId(null)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
 
   useEffect(() => {
     if (!projectId) return
@@ -142,13 +152,23 @@ export default function ProjectDetail() {
     }
   }
 
-  const handleTriggerSourcing = async (repoId: string) => {
+  const handleTriggerSourcing = async (repoId: string, sampleSize?: number) => {
     try {
-      await api.triggerSourcing(repoId)
-      setToast({ message: 'Scan started! Check Jobs for progress.', type: 'success' })
+      await api.triggerSourcing(repoId, sampleSize)
+      setToast({ message: sampleSize ? `Sample scan (${sampleSize}) started!` : 'Scan started! Check Jobs for progress.', type: 'success' })
       fetchData()
     } catch (error: any) {
       setToast({ message: error.response?.data?.detail || 'Failed to start scan', type: 'error' })
+    }
+  }
+
+  const handleAnalyzeStargazers = async (sourceId: string, sampleSize?: number) => {
+    try {
+      await api.analyzeStargazers(sourceId, sampleSize)
+      setToast({ message: sampleSize ? `Sample stargazer scan (${sampleSize}) started!` : 'Stargazer analysis started! Check Jobs for progress.', type: 'success' })
+      fetchData()
+    } catch (error: any) {
+      setToast({ message: error.response?.data?.detail || 'Failed to start stargazer analysis', type: 'error' })
     }
   }
 
@@ -326,13 +346,73 @@ export default function ProjectDetail() {
                   <div>Scan: {src.sourcing_interval}</div>
                 </div>
                 <div className="flex items-center justify-end mt-4">
-                  <button
-                    onClick={() => handleTriggerSourcing(src.id)}
-                    className="px-3 py-1 bg-primary hover:bg-primary/90 text-white rounded-lg inline-flex items-center text-sm"
-                  >
-                    <Play className="w-3 h-3 mr-1" />
-                    Run Scan
-                  </button>
+                  <div className="relative" ref={actionDropdownId === src.id ? actionDropdownRef : undefined}>
+                    <button
+                      onClick={() => setActionDropdownId(actionDropdownId === src.id ? null : src.id)}
+                      className="px-3 py-1.5 bg-primary hover:bg-primary/90 text-white rounded-lg inline-flex items-center text-sm gap-1.5 transition-colors"
+                    >
+                      <Play className="w-3 h-3" />
+                      Run
+                      <ChevronDown className={`w-3 h-3 transition-transform ${actionDropdownId === src.id ? 'rotate-180' : ''}`} />
+                    </button>
+                    {actionDropdownId === src.id && (
+                      <div className="absolute z-30 bottom-full mb-1 right-0 min-w-[220px] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl overflow-hidden">
+                        <button
+                          onClick={() => { handleTriggerSourcing(src.id); setActionDropdownId(null) }}
+                          className="w-full text-left px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                        >
+                          <div className="flex items-center gap-2">
+                            <Users className="w-4 h-4 text-primary flex-shrink-0" />
+                            <div>
+                              <div className="text-sm font-medium text-gray-900 dark:text-gray-100">Full Member Scan</div>
+                              <div className="text-[11px] text-gray-500 dark:text-gray-400">Fetch all contributors</div>
+                            </div>
+                          </div>
+                        </button>
+                        {src.source_type === 'github_repo' && (
+                          <button
+                            onClick={() => { handleAnalyzeStargazers(src.id); setActionDropdownId(null) }}
+                            className="w-full text-left px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-700/50 border-t border-gray-100 dark:border-gray-700 transition-colors"
+                          >
+                            <div className="flex items-center gap-2">
+                              <Sparkles className="w-4 h-4 text-amber-500 flex-shrink-0" />
+                              <div>
+                                <div className="text-sm font-medium text-gray-900 dark:text-gray-100">Stargazer Analysis</div>
+                                <div className="text-[11px] text-gray-500 dark:text-gray-400">Analyze who starred this repo</div>
+                              </div>
+                            </div>
+                          </button>
+                        )}
+                        <div className="border-t border-gray-100 dark:border-gray-700" />
+                        <button
+                          onClick={() => { handleTriggerSourcing(src.id, 5); setActionDropdownId(null) }}
+                          className="w-full text-left px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                        >
+                          <div className="flex items-center gap-2">
+                            <FlaskConical className="w-4 h-4 text-violet-500 flex-shrink-0" />
+                            <div>
+                              <div className="text-sm font-medium text-gray-900 dark:text-gray-100">Sample Members <span className="text-[10px] text-gray-400">(5)</span></div>
+                              <div className="text-[11px] text-gray-500 dark:text-gray-400">Quick test to verify sourcing</div>
+                            </div>
+                          </div>
+                        </button>
+                        {src.source_type === 'github_repo' && (
+                          <button
+                            onClick={() => { handleAnalyzeStargazers(src.id, 5); setActionDropdownId(null) }}
+                            className="w-full text-left px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-700/50 border-t border-gray-100 dark:border-gray-700 transition-colors"
+                          >
+                            <div className="flex items-center gap-2">
+                              <FlaskConical className="w-4 h-4 text-amber-400 flex-shrink-0" />
+                              <div>
+                                <div className="text-sm font-medium text-gray-900 dark:text-gray-100">Sample Stargazers <span className="text-[10px] text-gray-400">(5)</span></div>
+                                <div className="text-[11px] text-gray-500 dark:text-gray-400">Quick test stargazer analysis</div>
+                              </div>
+                            </div>
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             ))}

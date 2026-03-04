@@ -309,11 +309,19 @@ class JobProcessor:
             self.update_progress_step(db, step2, 'running')
             
             try:
+                sample_size = (job.job_metadata or {}).get('sample_size')
+                if sample_size:
+                    fetch_limit = sample_size
+                else:
+                    from settings_service import get_setting
+                    project = db.query(Project).filter(Project.id == job.project_id).first()
+                    org_id = project.org_id if project else None
+                    fetch_limit = int(get_setting(db, 'CONTRIBUTOR_SCAN_LIMIT', '100', org_id=org_id))
                 contributors_data = await asyncio.to_thread(
                     self.github_service.get_contributors,
                     repository.owner,
                     repository.repo_name,
-                    100
+                    fetch_limit
                 )
 
                 bulk_stats = {}
@@ -645,6 +653,11 @@ class JobProcessor:
                 social_context.linkedin_headline = linkedin_info.get('linkedin_headline')
                 social_context.current_company = classification.get('organization') or linkedin_info.get('current_company')
                 social_context.current_position = linkedin_info.get('current_position')
+
+                # Update member full_name from LinkedIn if we found a better name
+                linkedin_name = linkedin_info.get('linkedin_name')
+                if linkedin_name and len(linkedin_name.split()) >= 2:
+                    contributor.full_name = linkedin_name
                 social_context.position_level = position_level
                 social_context.industry = classification.get('industry')
                 social_context.search_results = search_results
@@ -729,11 +742,19 @@ class JobProcessor:
             self.update_progress_step(db, step1, 'running')
 
             try:
+                sample_size = (job.job_metadata or {}).get('sample_size')
+                if sample_size:
+                    sg_limit = sample_size
+                else:
+                    from settings_service import get_setting
+                    project = db.query(Project).filter(Project.id == job.project_id).first()
+                    org_id = project.org_id if project else None
+                    sg_limit = int(get_setting(db, 'STARGAZER_SCAN_LIMIT', '200', org_id=org_id))
                 stargazers_data = await asyncio.to_thread(
                     self.github_service.get_stargazers,
                     repository.owner,
                     repository.repo_name,
-                    200
+                    sg_limit
                 )
                 self.update_progress_step(
                     db, step1, 'completed',

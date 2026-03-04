@@ -4,6 +4,7 @@ import { FolderKanban, Plus, Globe, Target, X, Trash2, ExternalLink, Tag, Play }
 import { api } from '../lib/api'
 import Toast from '../components/Toast'
 import ConfirmDialog from '../components/ConfirmDialog'
+import StyledSelect from '../components/StyledSelect'
 
 interface Project {
   id: string
@@ -434,15 +435,16 @@ export default function Projects() {
                       className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 text-sm"
                       placeholder="https://github.com/owner/repo"
                     />
-                    <select
+                    <StyledSelect
                       value={src.sourcing_interval}
-                      onChange={(e) => updateSource(index, 'sourcing_interval', e.target.value)}
-                      className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 text-sm"
-                    >
-                      <option value="daily">Daily</option>
-                      <option value="weekly">Weekly</option>
-                      <option value="monthly">Monthly</option>
-                    </select>
+                      onChange={(v) => updateSource(index, 'sourcing_interval', v)}
+                      options={[
+                        { value: 'daily', label: 'Daily' },
+                        { value: 'weekly', label: 'Weekly' },
+                        { value: 'monthly', label: 'Monthly' },
+                      ]}
+                      placeholder="Interval"
+                    />
                     <button
                       type="button"
                       onClick={() => removeSource(index)}

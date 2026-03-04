@@ -307,11 +307,15 @@ async def update_source(
 @router.post("/{source_id}/source-now")
 async def trigger_sourcing(
     source_id: UUID,
+    payload: dict = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
     org_id = Depends(require_org),
 ):
-    """Trigger immediate sourcing for a community source."""
+    """Trigger immediate sourcing for a community source.
+    
+    Optional body: { "sample_size": 5 } to run a small sample scan.
+    """
     source = db.query(CommunitySource).join(
         Project, CommunitySource.project_id == Project.id
     ).filter(
@@ -340,28 +344,40 @@ async def trigger_sourcing(
     # Determine job type based on source type
     job_type = 'repository_sourcing' if source.source_type == 'github_repo' else 'source_ingestion'
 
+    # Build job metadata with optional sample_size
+    job_metadata = {}
+    sample_size = (payload or {}).get('sample_size')
+    if sample_size and isinstance(sample_size, int) and sample_size > 0:
+        job_metadata['sample_size'] = sample_size
+
     sourcing_job = SourcingJob(
         project_id=source.project_id,
         source_id=source.id,
         job_type=job_type,
         status='pending',
+        job_metadata=job_metadata or None,
         created_by=current_user.id
     )
     db.add(sourcing_job)
     db.commit()
     db.refresh(sourcing_job)
     
-    return {"message": "Sourcing job created", "job_id": str(sourcing_job.id)}
+    label = f"Sample scan ({sample_size})" if sample_size else "Sourcing job"
+    return {"message": f"{label} created", "job_id": str(sourcing_job.id)}
 
 
 @router.post("/{source_id}/analyze-stargazers")
 async def trigger_stargazer_analysis(
     source_id: UUID,
+    payload: dict = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
     org_id = Depends(require_org),
 ):
-    """Trigger stargazer/follower analysis for a source."""
+    """Trigger stargazer/follower analysis for a source.
+    
+    Optional body: { "sample_size": 5 } to run a small sample scan.
+    """
     source = db.query(CommunitySource).join(
         Project, CommunitySource.project_id == Project.id
     ).filter(
@@ -393,11 +409,17 @@ async def trigger_stargazer_analysis(
             detail="A stargazer analysis job is already in progress for this source"
         )
 
+    job_metadata = {}
+    sample_size = (payload or {}).get('sample_size')
+    if sample_size and isinstance(sample_size, int) and sample_size > 0:
+        job_metadata['sample_size'] = sample_size
+
     sourcing_job = SourcingJob(
         project_id=source.project_id,
         source_id=source.id,
         job_type='stargazer_analysis',
         status='pending',
+        job_metadata=job_metadata or None,
         created_by=current_user.id
     )
     db.add(sourcing_job)

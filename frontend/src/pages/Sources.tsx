@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
-import { Plus, Star, Users, Code, Play, Trash2, X, ExternalLink, Clock, FolderKanban, Sparkles, Globe } from 'lucide-react'
+import { Plus, Star, Users, Code, Play, Trash2, X, ExternalLink, Clock, FolderKanban, Sparkles, Globe, ChevronDown, FlaskConical } from 'lucide-react'
 import { api } from '../lib/api'
 import Toast from '../components/Toast'
 import ConfirmDialog from '../components/ConfirmDialog'
+import StyledSelect from '../components/StyledSelect'
 
 interface Source {
   id: string
@@ -88,7 +89,17 @@ export default function Sources() {
   const [submitting, setSubmitting] = useState(false)
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'warning' | 'info' } | null>(null)
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+  const [actionDropdownId, setActionDropdownId] = useState<string | null>(null)
+  const actionDropdownRef = useRef<HTMLDivElement>(null)
   const projectIdFilter = searchParams.get('project_id')
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (actionDropdownRef.current && !actionDropdownRef.current.contains(e.target as Node)) setActionDropdownId(null)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
 
   useEffect(() => {
     fetchData()
@@ -131,20 +142,20 @@ export default function Sources() {
     }
   }
 
-  const handleTriggerSourcing = async (sourceId: string) => {
+  const handleTriggerSourcing = async (sourceId: string, sampleSize?: number) => {
     try {
-      await api.triggerSourcing(sourceId)
-      setToast({ message: 'Scan started! Check the Jobs page for progress.', type: 'success' })
+      await api.triggerSourcing(sourceId, sampleSize)
+      setToast({ message: sampleSize ? `Sample scan (${sampleSize}) started!` : 'Scan started! Check the Jobs page for progress.', type: 'success' })
       fetchData()
     } catch (error: any) {
       setToast({ message: error.response?.data?.detail || 'Failed to start scan', type: 'error' })
     }
   }
 
-  const handleAnalyzeStargazers = async (sourceId: string) => {
+  const handleAnalyzeStargazers = async (sourceId: string, sampleSize?: number) => {
     try {
-      await api.analyzeStargazers(sourceId)
-      setToast({ message: 'Stargazer analysis started! Check the Jobs page for progress.', type: 'success' })
+      await api.analyzeStargazers(sourceId, sampleSize)
+      setToast({ message: sampleSize ? `Sample stargazer scan (${sampleSize}) started!` : 'Stargazer analysis started! Check the Jobs page for progress.', type: 'success' })
       fetchData()
     } catch (error: any) {
       setToast({ message: error.response?.data?.detail || 'Failed to start stargazer analysis', type: 'error' })
@@ -317,24 +328,71 @@ export default function Sources() {
                 </p>
 
                 {/* Actions — pinned to bottom */}
-                <div className="flex gap-2 mt-auto">
+                <div className="relative mt-auto" ref={actionDropdownId === src.id ? actionDropdownRef : undefined}>
                   <button
-                    onClick={() => handleTriggerSourcing(src.id)}
-                    className="flex-1 px-4 py-2 bg-primary hover:bg-primary/90 text-white rounded-lg inline-flex items-center justify-center text-sm"
-                    title="Run scan now"
+                    onClick={() => setActionDropdownId(actionDropdownId === src.id ? null : src.id)}
+                    className="w-full px-4 py-2 bg-primary hover:bg-primary/90 text-white rounded-lg inline-flex items-center justify-center text-sm font-medium gap-2 transition-colors"
                   >
-                    <Play className="w-4 h-4 mr-1.5" />
-                    Run Scan
+                    <Play className="w-4 h-4" />
+                    Run
+                    <ChevronDown className={`w-3.5 h-3.5 ml-auto transition-transform ${actionDropdownId === src.id ? 'rotate-180' : ''}`} />
                   </button>
-                  {src.source_type === 'github_repo' && (
-                    <button
-                      onClick={() => handleAnalyzeStargazers(src.id)}
-                      className="flex-1 px-4 py-2 border border-amber-400/60 dark:border-amber-500/40 text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg inline-flex items-center justify-center text-sm"
-                      title="Analyze who starred this repo to find leads"
-                    >
-                      <Sparkles className="w-4 h-4 mr-1.5" />
-                      Stargazers
-                    </button>
+                  {actionDropdownId === src.id && (
+                    <div className="absolute z-30 bottom-full mb-1 left-0 right-0 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl overflow-hidden">
+                      <button
+                        onClick={() => { handleTriggerSourcing(src.id); setActionDropdownId(null) }}
+                        className="w-full text-left px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Users className="w-4 h-4 text-primary flex-shrink-0" />
+                          <div>
+                            <div className="text-sm font-medium text-gray-900 dark:text-gray-100">Full Member Scan</div>
+                            <div className="text-[11px] text-gray-500 dark:text-gray-400">Fetch all contributors up to scan limit</div>
+                          </div>
+                        </div>
+                      </button>
+                      {src.source_type === 'github_repo' && (
+                        <button
+                          onClick={() => { handleAnalyzeStargazers(src.id); setActionDropdownId(null) }}
+                          className="w-full text-left px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-700/50 border-t border-gray-100 dark:border-gray-700 transition-colors"
+                        >
+                          <div className="flex items-center gap-2">
+                            <Sparkles className="w-4 h-4 text-amber-500 flex-shrink-0" />
+                            <div>
+                              <div className="text-sm font-medium text-gray-900 dark:text-gray-100">Stargazer Analysis</div>
+                              <div className="text-[11px] text-gray-500 dark:text-gray-400">Analyze who starred this repo</div>
+                            </div>
+                          </div>
+                        </button>
+                      )}
+                      <div className="border-t border-gray-100 dark:border-gray-700" />
+                      <button
+                        onClick={() => { handleTriggerSourcing(src.id, 5); setActionDropdownId(null) }}
+                        className="w-full text-left px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                      >
+                        <div className="flex items-center gap-2">
+                          <FlaskConical className="w-4 h-4 text-violet-500 flex-shrink-0" />
+                          <div>
+                            <div className="text-sm font-medium text-gray-900 dark:text-gray-100">Sample Members <span className="text-[10px] text-gray-400">(5)</span></div>
+                            <div className="text-[11px] text-gray-500 dark:text-gray-400">Quick test to verify sourcing works</div>
+                          </div>
+                        </div>
+                      </button>
+                      {src.source_type === 'github_repo' && (
+                        <button
+                          onClick={() => { handleAnalyzeStargazers(src.id, 5); setActionDropdownId(null) }}
+                          className="w-full text-left px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-700/50 border-t border-gray-100 dark:border-gray-700 transition-colors"
+                        >
+                          <div className="flex items-center gap-2">
+                            <FlaskConical className="w-4 h-4 text-amber-400 flex-shrink-0" />
+                            <div>
+                              <div className="text-sm font-medium text-gray-900 dark:text-gray-100">Sample Stargazers <span className="text-[10px] text-gray-400">(5)</span></div>
+                              <div className="text-[11px] text-gray-500 dark:text-gray-400">Quick test stargazer analysis</div>
+                            </div>
+                          </div>
+                        </button>
+                      )}
+                    </div>
                   )}
                 </div>
               </div>
@@ -364,32 +422,26 @@ export default function Sources() {
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                     Project *
                   </label>
-                  <select
-                    required
+                  <StyledSelect
                     value={formData.project_id}
-                    onChange={(e) => setFormData({ ...formData, project_id: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
-                  >
-                    <option value="">Select a project</option>
-                    {projects.map((project) => (
-                      <option key={project.id} value={project.id}>{project.name}</option>
-                    ))}
-                  </select>
+                    onChange={(v) => setFormData({ ...formData, project_id: v })}
+                    options={projects.map(p => ({ value: p.id, label: p.name }))}
+                    placeholder="Select a project"
+                    className="w-full py-2"
+                  />
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                     Source Type
                   </label>
-                  <select
+                  <StyledSelect
                     value={formData.source_type}
-                    onChange={(e) => setFormData({ ...formData, source_type: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
-                  >
-                    {Object.entries(SOURCE_TYPE_LABELS).map(([value, label]) => (
-                      <option key={value} value={value}>{label}</option>
-                    ))}
-                  </select>
+                    onChange={(v) => setFormData({ ...formData, source_type: v })}
+                    options={Object.entries(SOURCE_TYPE_LABELS).map(([value, label]) => ({ value, label }))}
+                    placeholder="Select source type"
+                    className="w-full py-2"
+                  />
                 </div>
 
                 <div>
@@ -419,15 +471,17 @@ export default function Sources() {
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                     Scan Interval *
                   </label>
-                  <select
+                  <StyledSelect
                     value={formData.sourcing_interval}
-                    onChange={(e) => setFormData({ ...formData, sourcing_interval: e.target.value as any })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
-                  >
-                    <option value="daily">Daily</option>
-                    <option value="weekly">Weekly</option>
-                    <option value="monthly">Monthly</option>
-                  </select>
+                    onChange={(v) => setFormData({ ...formData, sourcing_interval: v as any })}
+                    options={[
+                      { value: 'daily', label: 'Daily' },
+                      { value: 'weekly', label: 'Weekly' },
+                      { value: 'monthly', label: 'Monthly' },
+                    ]}
+                    placeholder="Select interval"
+                    className="w-full py-2"
+                  />
                   <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                     How often should we scan for new members?
                   </p>

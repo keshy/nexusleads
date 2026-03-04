@@ -3,6 +3,7 @@ import { RefreshCw, Clock, CheckCircle, XCircle, AlertCircle, Pause, Play, GitBr
 import { api } from '../lib/api'
 import Toast from '../components/Toast'
 import ConfirmDialog from '../components/ConfirmDialog'
+import StyledSelect from '../components/StyledSelect'
 
 interface Job {
   id: string
@@ -210,40 +211,33 @@ export default function Jobs() {
       <div className="flex items-center space-x-3">
         <Filter className="w-5 h-5 text-gray-500 dark:text-gray-400" />
         
-        <select
+        <StyledSelect
           value={projectFilter}
-          onChange={(e: any) => setProjectFilter(e.target.value)}
-          className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
-        >
-          <option value="all">All Projects</option>
-          {projects.map((p: any) => (
-            <option key={p.id} value={p.id}>{p.name}</option>
-          ))}
-        </select>
+          onChange={(v) => setProjectFilter(v)}
+          options={[{ value: 'all', label: 'All Projects' }, ...projects.map((p: any) => ({ value: p.id, label: p.name }))]}
+          placeholder="All Projects"
+        />
         
-        <select
+        <StyledSelect
           value={repositoryFilter}
-          onChange={(e: any) => setRepositoryFilter(e.target.value)}
-          className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
-        >
-          <option value="all">All Repositories</option>
-          {repositories.map((r: any) => (
-            <option key={r.id} value={r.id}>{r.full_name}</option>
-          ))}
-        </select>
+          onChange={(v) => setRepositoryFilter(v)}
+          options={[{ value: 'all', label: 'All Sources' }, ...repositories.map((r: any) => ({ value: r.id, label: r.full_name }))]}
+          placeholder="All Sources"
+        />
         
-        <select
+        <StyledSelect
           value={statusFilter}
-          onChange={(e: any) => setStatusFilter(e.target.value)}
-          className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
-        >
-          <option value="all">All Statuses</option>
-          <option value="pending">Pending</option>
-          <option value="running">Running</option>
-          <option value="completed">Completed</option>
-          <option value="failed">Failed</option>
-          <option value="cancelled">Cancelled</option>
-        </select>
+          onChange={(v) => setStatusFilter(v)}
+          options={[
+            { value: 'all', label: 'All Statuses' },
+            { value: 'pending', label: 'Pending' },
+            { value: 'running', label: 'Running' },
+            { value: 'completed', label: 'Completed' },
+            { value: 'failed', label: 'Failed' },
+            { value: 'cancelled', label: 'Cancelled' },
+          ]}
+          placeholder="All Statuses"
+        />
         
         <span className="text-sm text-gray-600 dark:text-gray-400">
           {jobs.length} {jobs.length === 1 ? 'job' : 'jobs'}

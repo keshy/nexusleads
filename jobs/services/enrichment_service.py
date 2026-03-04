@@ -138,6 +138,7 @@ class EnrichmentService:
             "linkedin_url": None,
             "linkedin_profile_photo_url": None,
             "linkedin_headline": None,
+            "linkedin_name": None,
             "current_company": None,
             "current_position": None
         }
@@ -155,12 +156,21 @@ class EnrichmentService:
                 snippet = result.get("snippet", "")
                 title = result.get("title", "")
                 
-                # Parse title (usually contains name and position)
-                if " - " in title:
-                    parts = title.split(" - ")
-                    if len(parts) >= 2:
-                        linkedin_info["current_position"] = parts[0].strip()
-                        linkedin_info["current_company"] = parts[1].strip()
+                # LinkedIn titles are: "Name - Position - Company | LinkedIn"
+                # or "Name - Company | LinkedIn" or just "Name | LinkedIn"
+                # Strip the trailing " | LinkedIn" first
+                clean_title = title.split(" | ")[0].strip() if " | " in title else title.strip()
+                
+                if " - " in clean_title:
+                    parts = [p.strip() for p in clean_title.split(" - ")]
+                    linkedin_info["linkedin_name"] = parts[0]
+                    if len(parts) >= 3:
+                        linkedin_info["current_position"] = parts[1]
+                        linkedin_info["current_company"] = parts[2]
+                    elif len(parts) == 2:
+                        linkedin_info["current_position"] = parts[1]
+                elif clean_title:
+                    linkedin_info["linkedin_name"] = clean_title
                 
                 # Use snippet as headline
                 linkedin_info["linkedin_headline"] = snippet[:200] if snippet else None

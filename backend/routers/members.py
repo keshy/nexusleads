@@ -3,7 +3,7 @@ from typing import List, Optional
 from uuid import UUID
 from fastapi import APIRouter, Depends, Header, HTTPException, status, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, desc
+from sqlalchemy import and_, desc, or_
 from database import get_db
 from auth import get_current_active_user
 from org_context import require_org
@@ -17,6 +17,7 @@ from schemas import (
     SocialContextResponse, LeadScoreResponse
 )
 from datetime import datetime
+from settings_service import get_excluded_organizations
 
 router = APIRouter()
 
@@ -82,6 +83,8 @@ async def get_leads_by_project(
     org_id = Depends(require_org),
 ):
     """Get all leads organized by project."""
+    excluded_domains = get_excluded_organizations(db, org_id)
+
     projects = db.query(Project).filter(
         Project.org_id == org_id,
         Project.is_active == True
@@ -97,6 +100,14 @@ async def get_leads_by_project(
                 LeadScore.project_id == project.id,
                 SocialContext.classification.in_(['DECISION_MAKER', 'HIGH_IMPACT'])
             )
+
+        # Exclude members from excluded organizations
+        if excluded_domains:
+            exclude_conditions = []
+            for domain in excluded_domains:
+                exclude_conditions.append(Member.email.ilike(f'%@{domain}'))
+                exclude_conditions.append(SocialContext.current_company.ilike(f'%{domain.split(".")[0]}%'))
+            leads_query = leads_query.filter(~or_(*exclude_conditions))
 
         if source:
             leads_query = leads_query.filter(
@@ -133,11 +144,16 @@ async def get_leads_by_project(
             ).order_by(desc(ClayPushLog.pushed_at)).first()
             return log[0].isoformat() if log else None
 
+        # Batch-load owners for this project's leads
+        all_leads_and_others = list(leads)
+        all_owner_ids = {ls.owner_id for _, _, ls in all_leads_and_others if ls.owner_id}
+
         # Build leads list
         leads_list = []
         for member, social_context, lead_score in leads:
             leads_list.append({
                 "id": str(member.id),
+                "lead_score_id": str(lead_score.id),
                 "full_name": member.full_name,
                 "username": member.username,
                 "email": member.email,
@@ -157,7 +173,8 @@ async def get_leads_by_project(
                 "position_score": float(lead_score.position_score) if lead_score and lead_score.position_score else 0,
                 "engagement_score": float(lead_score.engagement_score) if lead_score and lead_score.engagement_score else 0,
                 "source": get_source(member.id),
-                "clay_pushed_at": get_clay_pushed_at(member.id)
+                "clay_pushed_at": get_clay_pushed_at(member.id),
+                "owner_id": str(lead_score.owner_id) if lead_score.owner_id else None,
             })
         
         # Get other members (KEY_CONTRIBUTOR or unclassified)
@@ -168,8 +185,16 @@ async def get_leads_by_project(
             .filter(
                 LeadScore.project_id == project.id,
                 ~Member.id.in_([l["id"] for l in leads_list]) if leads_list else True
-            )\
-            .order_by(desc(LeadScore.overall_score))\
+            )
+
+        if excluded_domains:
+            exclude_conditions_others = []
+            for domain in excluded_domains:
+                exclude_conditions_others.append(Member.email.ilike(f'%@{domain}'))
+                exclude_conditions_others.append(SocialContext.current_company.ilike(f'%{domain.split(".")[0]}%'))
+            others_query = others_query.filter(~or_(*exclude_conditions_others))
+
+        others_query = others_query.order_by(desc(LeadScore.overall_score))\
             .limit(100)\
             .all()
 
@@ -177,8 +202,10 @@ async def get_leads_by_project(
         for member, social_context, lead_score in others_query:
             if str(member.id) in lead_member_ids:
                 continue
+            all_owner_ids.add(lead_score.owner_id) if lead_score.owner_id else None
             contributors_list.append({
                 "id": str(member.id),
+                "lead_score_id": str(lead_score.id),
                 "full_name": member.full_name,
                 "username": member.username,
                 "email": member.email,
@@ -198,15 +225,23 @@ async def get_leads_by_project(
                 "position_score": float(lead_score.position_score) if lead_score and lead_score.position_score else 0,
                 "engagement_score": float(lead_score.engagement_score) if lead_score and lead_score.engagement_score else 0,
                 "source": get_source(member.id),
-                "clay_pushed_at": get_clay_pushed_at(member.id)
+                "clay_pushed_at": get_clay_pushed_at(member.id),
+                "owner_id": str(lead_score.owner_id) if lead_score.owner_id else None,
             })
+
+        # Batch-load owner info for this project
+        owner_map = {}
+        if all_owner_ids:
+            owners = db.query(User).filter(User.id.in_(all_owner_ids)).all()
+            owner_map = {str(u.id): {"id": str(u.id), "username": u.username, "full_name": u.full_name} for u in owners}
 
         result.append({
             "id": str(project.id),
             "name": project.name,
             "description": project.description,
             "leads": leads_list,
-            "contributors": contributors_list
+            "contributors": contributors_list,
+            "owners": owner_map,
         })
     
     return result
@@ -472,3 +507,44 @@ async def enrich_member(
     db.refresh(job)
     
     return {"message": "Enrichment job created", "job_id": str(job.id)}
+
+
+@router.post("/assign-owner")
+async def assign_lead_owner(
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    org_id = Depends(require_org),
+):
+    """Assign an owner to one or more leads (lead_score records).
+    
+    Body: { "lead_score_ids": [uuid, ...], "owner_id": uuid | null }
+    owner_id=null removes the assignment.
+    """
+    from models import OrgMember
+
+    lead_score_ids = payload.get("lead_score_ids", [])
+    owner_id = payload.get("owner_id")  # None = unassign
+
+    if not lead_score_ids:
+        raise HTTPException(status_code=400, detail="lead_score_ids is required")
+
+    # Validate owner belongs to the org (if assigning)
+    if owner_id:
+        owner_member = db.query(OrgMember).filter(
+            OrgMember.org_id == org_id,
+            OrgMember.user_id == owner_id,
+        ).first()
+        if not owner_member:
+            raise HTTPException(status_code=400, detail="Owner is not a member of this organization")
+
+    # Update lead_scores — only those belonging to projects in the caller's org
+    updated = db.query(LeadScore).filter(
+        LeadScore.id.in_(lead_score_ids),
+        LeadScore.project_id.in_(
+            db.query(Project.id).filter(Project.org_id == org_id)
+        )
+    ).update({LeadScore.owner_id: owner_id}, synchronize_session="fetch")
+
+    db.commit()
+    return {"updated": updated}

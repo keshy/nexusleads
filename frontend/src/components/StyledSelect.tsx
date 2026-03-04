@@ -11,9 +11,10 @@ interface StyledSelectProps {
   onChange: (value: string) => void
   options: Option[]
   placeholder: string
+  className?: string
 }
 
-export default function StyledSelect({ value, onChange, options, placeholder }: StyledSelectProps) {
+export default function StyledSelect({ value, onChange, options, placeholder, className }: StyledSelectProps) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -30,10 +31,11 @@ export default function StyledSelect({ value, onChange, options, placeholder }: 
   return (
     <div ref={ref} className="relative">
       <button
+        type="button"
         onClick={() => setOpen(!open)}
         className={`
           flex items-center justify-between gap-2 px-3 py-1.5 text-sm rounded-lg
-          border transition-all duration-150 min-w-[160px]
+          border transition-all duration-150 ${className || 'min-w-[160px]'}
           ${value
             ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 dark:border-cyan-400/30 dark:bg-cyan-400/10'
             : 'border-gray-200 dark:border-gray-600 bg-white/80 dark:bg-gray-800/80 text-gray-700 dark:text-gray-300'

@@ -29,6 +29,7 @@ interface Lead {
   linkedin_url?: string
   linkedin_profile_photo_url?: string
   source?: string
+  owner?: { id: string; username: string; full_name?: string } | null
 }
 
 export default function Dashboard() {
@@ -274,6 +275,12 @@ export default function Dashboard() {
                         {lead.project_name && (
                           <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
                             {lead.project_name}
+                          </span>
+                        )}
+                        {lead.owner && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded-full bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300">
+                            <Users className="w-3 h-3" />
+                            {lead.owner.full_name || lead.owner.username}
                           </span>
                         )}
                       </div>

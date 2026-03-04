@@ -4,6 +4,7 @@ import { GitBranch, Plus, Star, GitFork, Code, Play, Trash2, X, ExternalLink, Cl
 import { api } from '../lib/api'
 import Toast from '../components/Toast'
 import ConfirmDialog from '../components/ConfirmDialog'
+import StyledSelect from '../components/StyledSelect'
 
 interface Repository {
   id: string
@@ -314,17 +315,13 @@ export default function Repositories() {
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                     Project *
                   </label>
-                  <select
-                    required
+                  <StyledSelect
                     value={formData.project_id}
-                    onChange={(e) => setFormData({ ...formData, project_id: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
-                  >
-                    <option value="">Select a project</option>
-                    {projects.map((project) => (
-                      <option key={project.id} value={project.id}>{project.name}</option>
-                    ))}
-                  </select>
+                    onChange={(v) => setFormData({ ...formData, project_id: v })}
+                    options={projects.map(p => ({ value: p.id, label: p.name }))}
+                    placeholder="Select a project"
+                    className="w-full py-2"
+                  />
                 </div>
 
                 <div>
@@ -348,15 +345,17 @@ export default function Repositories() {
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                     Sourcing Interval *
                   </label>
-                  <select
+                  <StyledSelect
                     value={formData.sourcing_interval}
-                    onChange={(e) => setFormData({ ...formData, sourcing_interval: e.target.value as any })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
-                  >
-                    <option value="daily">Daily</option>
-                    <option value="weekly">Weekly</option>
-                    <option value="monthly">Monthly</option>
-                  </select>
+                    onChange={(v) => setFormData({ ...formData, sourcing_interval: v as any })}
+                    options={[
+                      { value: 'daily', label: 'Daily' },
+                      { value: 'weekly', label: 'Weekly' },
+                      { value: 'monthly', label: 'Monthly' },
+                    ]}
+                    placeholder="Select interval"
+                    className="w-full py-2"
+                  />
                   <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                     How often should we check for new contributors?
                   </p>

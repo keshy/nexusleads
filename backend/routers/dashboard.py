@@ -13,6 +13,7 @@ from models import (
     SocialContext, SourcingJob, MemberActivity, CommunityMember
 )
 from schemas import DashboardStats, SourceLeadStats
+from settings_service import get_excluded_organizations
 
 router = APIRouter()
 
@@ -247,23 +248,32 @@ async def get_top_leads(
 ):
     """Get top leads by score across all projects."""
     
-    # Subquery: best LeadScore per member (highest overall_score) to deduplicate
-    best_score_sq = db.query(
-        LeadScore.member_id,
-        func.max(LeadScore.overall_score).label("max_score")
+    # Exclude members from excluded organizations
+    excluded_domains = get_excluded_organizations(db, org_id)
+    
+    # Subquery: best LeadScore per member (highest overall_score) to deduplicate.
+    # Use row_number to guarantee exactly one row per member.
+    from sqlalchemy import over, literal_column
+    from sqlalchemy.sql.expression import text as sql_text
+
+    base_q = db.query(
+        LeadScore.id.label("ls_id"),
+        func.row_number().over(
+            partition_by=LeadScore.member_id,
+            order_by=desc(LeadScore.overall_score)
+        ).label("rn")
     ).join(
         Project, LeadScore.project_id == Project.id
     ).filter(
         Project.org_id == org_id
     )
     if project_id:
-        best_score_sq = best_score_sq.filter(LeadScore.project_id == project_id)
-    best_score_sq = best_score_sq.group_by(LeadScore.member_id).subquery()
+        base_q = base_q.filter(LeadScore.project_id == project_id)
+    best_sq = base_q.subquery()
 
     query = db.query(LeadScore, Member, SocialContext, Project.name).join(
-        best_score_sq,
-        (LeadScore.member_id == best_score_sq.c.member_id) &
-        (LeadScore.overall_score == best_score_sq.c.max_score)
+        best_sq,
+        (LeadScore.id == best_sq.c.ls_id) & (best_sq.c.rn == 1)
     ).join(
         Member, LeadScore.member_id == Member.id
     ).join(
@@ -281,16 +291,35 @@ async def get_top_leads(
     if source:
         query = query.filter(
             Member.id.in_(
-                db.query(CommunityMember.member_id).join(
-                    CommunitySource, CommunityMember.source_id == CommunitySource.id
+                db.query(MemberActivity.member_id).join(
+                    CommunitySource, MemberActivity.source_id == CommunitySource.id
                 ).filter(
-                    CommunityMember.role == source
+                    CommunitySource.project_id.in_(
+                        db.query(Project.id).filter(Project.org_id == org_id)
+                    ),
+                    MemberActivity.source == source
                 )
             )
         )
     
+    # Exclude members from excluded organizations (match on email domain or company name)
+    if excluded_domains:
+        from sqlalchemy import or_
+        exclude_conditions = []
+        for domain in excluded_domains:
+            exclude_conditions.append(Member.email.ilike(f'%@{domain}'))
+            exclude_conditions.append(SocialContext.current_company.ilike(f'%{domain.split(".")[0]}%'))
+        query = query.filter(~or_(*exclude_conditions))
+    
     results = query.order_by(desc(LeadScore.overall_score)).limit(limit).all()
     
+    # Batch-load owners for all results
+    owner_ids = {ls.owner_id for ls, _, _, _ in results if ls.owner_id}
+    owner_map = {}
+    if owner_ids:
+        owners = db.query(User).filter(User.id.in_(owner_ids)).all()
+        owner_map = {u.id: {"id": str(u.id), "username": u.username, "full_name": u.full_name} for u in owners}
+
     leads = []
     for lead_score, member, social_context, project_name in results:
         lead = {
@@ -315,12 +344,13 @@ async def get_top_leads(
             "industry": social_context.industry if social_context else None,
             "linkedin_url": social_context.linkedin_url if social_context else None,
             "linkedin_profile_photo_url": social_context.linkedin_profile_photo_url if social_context else None,
-            "source": (db.query(CommunityMember.role).join(
-                CommunitySource, CommunityMember.source_id == CommunitySource.id
+            "source": (db.query(MemberActivity.source).join(
+                CommunitySource, MemberActivity.source_id == CommunitySource.id
             ).filter(
                 CommunitySource.project_id == lead_score.project_id,
-                CommunityMember.member_id == member.id
+                MemberActivity.member_id == member.id
             ).first() or ('commit',))[0],
+            "owner": owner_map.get(lead_score.owner_id),
         }
         leads.append(lead)
     

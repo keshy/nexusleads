@@ -92,7 +92,7 @@ class CommunitySource(Base):
     # Relationships
     project = relationship("Project", back_populates="sources")
     community_members = relationship("CommunityMember", back_populates="source", cascade="all, delete-orphan")
-    member_activity = relationship("MemberActivity", back_populates="source", cascade="all, delete-orphan")
+    member_activity = relationship("MemberActivity", back_populates="community_source", cascade="all, delete-orphan")
     sourcing_jobs = relationship("SourcingJob", back_populates="source")
 
 
@@ -178,7 +178,7 @@ class MemberActivity(Base):
     )
     
     # Relationships
-    source = relationship("CommunitySource", back_populates="member_activity")
+    community_source = relationship("CommunitySource", back_populates="member_activity")
     member = relationship("Member", back_populates="activity")
 
 
@@ -417,6 +417,7 @@ class LeadScore(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     member_id = Column(UUID(as_uuid=True), ForeignKey("members.id", ondelete="CASCADE"), nullable=False)
+    owner_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     overall_score = Column(DECIMAL(5, 2), default=0.00)
     activity_score = Column(DECIMAL(5, 2), default=0.00)
     influence_score = Column(DECIMAL(5, 2), default=0.00)
@@ -434,3 +435,4 @@ class LeadScore(Base):
     # Relationships
     project = relationship("Project", back_populates="lead_scores")
     member = relationship("Member", back_populates="lead_scores")
+    owner = relationship("User", foreign_keys=[owner_id])
