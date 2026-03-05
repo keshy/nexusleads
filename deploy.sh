@@ -299,6 +299,7 @@ MIGRATIONS=(
   database/migrations/009_align_org_schema.sql
   database/migrations/010_community_generalization.sql
   database/migrations/011_nullable_github_fields.sql
+  database/migrations/012_add_lead_owner.sql
 )
 
 for f in "${MIGRATIONS[@]}"; do
