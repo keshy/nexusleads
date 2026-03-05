@@ -20,6 +20,7 @@ interface Job {
   created_at: string
   project_name?: string
   repository_name?: string
+  job_metadata?: Record<string, any>
 }
 
 export default function Jobs() {
@@ -282,6 +283,9 @@ export default function Jobs() {
                     </div>
                     <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
                       {formatJobType(job.job_type)}
+                      {job.job_type === 'social_enrichment' && job.job_metadata?.username && (
+                        <span className="ml-2 text-xs font-mono text-cyan-600 dark:text-cyan-400">@{job.job_metadata.username}</span>
+                      )}
                     </p>
                     <div className="flex items-center space-x-4 text-sm text-gray-600 dark:text-gray-400">
                       {job.repository_id && (
@@ -439,6 +443,12 @@ export default function Jobs() {
                 </div>
                 <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
                   {formatJobType(selectedJob.job_type)}
+                  {selectedJob.job_type === 'social_enrichment' && selectedJob.job_metadata?.username && (
+                    <span className="ml-2 text-xs font-mono text-cyan-600 dark:text-cyan-400">@{selectedJob.job_metadata.username}</span>
+                  )}
+                  {selectedJob.job_metadata?.sample_size && (
+                    <span className="ml-2 text-xs text-violet-600 dark:text-violet-400">sample: {selectedJob.job_metadata.sample_size}</span>
+                  )}
                 </p>
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div>

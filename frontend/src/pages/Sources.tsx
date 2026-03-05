@@ -338,7 +338,7 @@ export default function Sources() {
                     <ChevronDown className={`w-3.5 h-3.5 ml-auto transition-transform ${actionDropdownId === src.id ? 'rotate-180' : ''}`} />
                   </button>
                   {actionDropdownId === src.id && (
-                    <div className="absolute z-30 bottom-full mb-1 left-0 right-0 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl overflow-hidden">
+                    <div className="absolute z-30 top-full mt-1 left-0 right-0 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl overflow-hidden">
                       <button
                         onClick={() => { handleTriggerSourcing(src.id); setActionDropdownId(null) }}
                         className="w-full text-left px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"

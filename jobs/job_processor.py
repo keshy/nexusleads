@@ -311,12 +311,13 @@ class JobProcessor:
             try:
                 sample_size = (job.job_metadata or {}).get('sample_size')
                 if sample_size:
-                    fetch_limit = sample_size
+                    fetch_limit = int(sample_size)
                 else:
                     from settings_service import get_setting
                     project = db.query(Project).filter(Project.id == job.project_id).first()
                     org_id = project.org_id if project else None
                     fetch_limit = int(get_setting(db, 'CONTRIBUTOR_SCAN_LIMIT', '100', org_id=org_id))
+                logger.info(f"Contributor limit for job {job.id}: {fetch_limit} (sample_size={sample_size})")
                 contributors_data = await asyncio.to_thread(
                     self.github_service.get_contributors,
                     repository.owner,
@@ -495,6 +496,9 @@ class JobProcessor:
                 else:
                     sample = unenriched
 
+                member_ids = [cm.member_id for cm in sample]
+                member_map = {m.id: m.username for m in db.query(Member).filter(Member.id.in_(member_ids)).all()} if member_ids else {}
+
                 enrich_count = 0
                 for cm in sample:
                     enrich_job = SourcingJob(
@@ -502,7 +506,7 @@ class JobProcessor:
                         source_id=repository.id,
                         job_type='social_enrichment',
                         status='pending',
-                        job_metadata={'contributor_id': str(cm.member_id)},
+                        job_metadata={'contributor_id': str(cm.member_id), 'username': member_map.get(cm.member_id, 'unknown')},
                         created_by=job.created_by
                     )
                     db.add(enrich_job)
@@ -744,12 +748,13 @@ class JobProcessor:
             try:
                 sample_size = (job.job_metadata or {}).get('sample_size')
                 if sample_size:
-                    sg_limit = sample_size
+                    sg_limit = int(sample_size)
                 else:
                     from settings_service import get_setting
                     project = db.query(Project).filter(Project.id == job.project_id).first()
                     org_id = project.org_id if project else None
                     sg_limit = int(get_setting(db, 'STARGAZER_SCAN_LIMIT', '200', org_id=org_id))
+                logger.info(f"Stargazer limit for job {job.id}: {sg_limit} (sample_size={sample_size})")
                 stargazers_data = await asyncio.to_thread(
                     self.github_service.get_stargazers,
                     repository.owner,
@@ -889,6 +894,9 @@ class JobProcessor:
                 else:
                     sample = unenriched
 
+                member_ids = [cm.member_id for cm in sample]
+                member_map = {m.id: m.username for m in db.query(Member).filter(Member.id.in_(member_ids)).all()} if member_ids else {}
+
                 enrich_count = 0
                 for cm in sample:
                     enrich_job = SourcingJob(
@@ -896,7 +904,7 @@ class JobProcessor:
                         source_id=repository.id,
                         job_type='social_enrichment',
                         status='pending',
-                        job_metadata={'contributor_id': str(cm.member_id)},
+                        job_metadata={'contributor_id': str(cm.member_id), 'username': member_map.get(cm.member_id, 'unknown')},
                         created_by=job.created_by
                     )
                     db.add(enrich_job)
@@ -1133,6 +1141,9 @@ class JobProcessor:
             else:
                 sample = unenriched
 
+            member_ids = [cm.member_id for cm in sample]
+            member_map = {m.id: m.username for m in db.query(Member).filter(Member.id.in_(member_ids)).all()} if member_ids else {}
+
             enrich_count = 0
             for cm in sample:
                 enrich_job = SourcingJob(
@@ -1140,7 +1151,7 @@ class JobProcessor:
                     source_id=source.id,
                     job_type='social_enrichment',
                     status='pending',
-                    job_metadata={'contributor_id': str(cm.member_id)},
+                    job_metadata={'contributor_id': str(cm.member_id), 'username': member_map.get(cm.member_id, 'unknown')},
                     created_by=job.created_by,
                 )
                 db.add(enrich_job)
