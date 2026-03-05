@@ -792,7 +792,7 @@ export default function Settings() {
                   </thead>
                   <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
                     {users.map((u) => (
-                      <tr key={u.id} className="hover:bg-gray-50 dark:hover:bg-gray-750">
+                      <tr key={u.id} className="bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700/50">
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{u.full_name || u.username}</div>
                           <div className="text-sm text-gray-500 dark:text-gray-400">@{u.username}</div>
