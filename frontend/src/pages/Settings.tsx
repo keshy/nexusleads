@@ -77,7 +77,7 @@ export default function Settings() {
   }, [user])
 
   useEffect(() => {
-    if (user?.is_admin && activeTab === 'users') {
+    if (activeTab === 'users') {
       fetchUsers()
     }
     if (activeTab === 'apikeys') {
@@ -325,8 +325,7 @@ export default function Settings() {
               </div>
             </button>
           )}
-          {user?.is_admin && (
-            <button
+          <button
               onClick={() => setActiveTab('users')}
               className={`py-4 px-1 border-b-2 font-medium text-sm ${
                 activeTab === 'users'
@@ -339,7 +338,6 @@ export default function Settings() {
                 <span>User Management</span>
               </div>
             </button>
-          )}
           {FEATURE_BILLING && (
             <button
               onClick={() => setActiveTab('billing')}
@@ -726,19 +724,21 @@ export default function Settings() {
       )}
 
       {/* User Management Tab */}
-      {activeTab === 'users' && user?.is_admin && (
+      {activeTab === 'users' && (
         <div>
           <div className="flex items-center justify-between mb-6">
             <p className="text-sm text-gray-600 dark:text-gray-400">
               Manage user accounts and permissions
             </p>
-            <button
-              onClick={() => setShowAddUser(true)}
-              className="px-4 py-2 bg-primary hover:bg-primary/90 text-white font-medium rounded-lg transition-colors inline-flex items-center"
-            >
-              <UserPlus className="w-5 h-5 mr-2" />
-              Add User
-            </button>
+            {user?.is_admin && (
+              <button
+                onClick={() => setShowAddUser(true)}
+                className="px-4 py-2 bg-primary hover:bg-primary/90 text-white font-medium rounded-lg transition-colors inline-flex items-center"
+              >
+                <UserPlus className="w-5 h-5 mr-2" />
+                Add User
+              </button>
+            )}
           </div>
 
           {loading ? (
@@ -785,9 +785,11 @@ export default function Settings() {
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                         Last Login
                       </th>
-                      <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        Actions
-                      </th>
+                      {user?.is_admin && (
+                        <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          Actions
+                        </th>
+                      )}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
@@ -835,15 +837,17 @@ export default function Settings() {
                             <span className="text-gray-400">Never</span>
                           )}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                          <button
-                            onClick={() => handleDeleteUser(u.id)}
-                            className="text-red-600 dark:text-red-400 hover:text-red-900 dark:hover:text-red-300"
-                            title="Delete user"
-                          >
-                            <Trash2 className="w-5 h-5" />
-                          </button>
-                        </td>
+                        {user?.is_admin && (
+                          <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                            <button
+                              onClick={() => handleDeleteUser(u.id)}
+                              className="text-red-600 dark:text-red-400 hover:text-red-900 dark:hover:text-red-300"
+                              title="Delete user"
+                            >
+                              <Trash2 className="w-5 h-5" />
+                            </button>
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>

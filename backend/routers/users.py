@@ -27,9 +27,9 @@ async def list_users(
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin)
+    current_user: User = Depends(get_current_active_user)
 ):
-    """List all users (admin only)."""
+    """List all users (any authenticated user, read-only)."""
     users = db.query(User).offset(skip).limit(limit).all()
     return users
 
