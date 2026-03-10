@@ -1,4 +1,16 @@
 import axios, { AxiosInstance, InternalAxiosRequestConfig } from 'axios'
+import type { FilterMode } from './leadFilters'
+
+interface LeadFilterParam {
+  value?: string
+  mode?: FilterMode
+}
+
+interface LeadFilterParams {
+  classification?: LeadFilterParam
+  industry?: LeadFilterParam
+  company?: LeadFilterParam
+}
 
 function resolveApiUrl() {
   const envUrl = (import.meta.env.VITE_API_URL || '').trim()
@@ -277,10 +289,19 @@ class ApiClient {
     return response.data
   }
 
-  async getTopLeads(projectId?: string, source?: string) {
+  async getTopLeads(
+    projectId?: string,
+    source?: string,
+    projectMode: FilterMode = 'include',
+    sourceMode: FilterMode = 'include',
+    filters?: LeadFilterParams
+  ) {
     const params: Record<string, string> = {}
     if (projectId) params.project_id = projectId
     if (source) params.source = source
+    if (projectId) params.project_mode = projectMode
+    if (source) params.source_mode = sourceMode
+    this.applyLeadFilterParams(params, filters)
     const response = await this.client.get('/api/dashboard/top-leads', { params })
     return response.data
   }
@@ -306,9 +327,11 @@ class ApiClient {
   }
 
   // Leads
-  async getLeadsByProject(source?: string) {
+  async getLeadsByProject(source?: string, sourceMode: FilterMode = 'include', filters?: LeadFilterParams) {
     const params: Record<string, string> = {}
     if (source) params.source = source
+    if (source) params.source_mode = sourceMode
+    this.applyLeadFilterParams(params, filters)
     const response = await this.client.get('/api/leads/by-project', { params })
     return response.data
   }
@@ -460,6 +483,21 @@ class ApiClient {
   // Aliases used by ChatSidecar (orgId sent via header, param kept for compat)
   async listChatConversations(_orgId?: string) {
     return this.getChatConversations()
+  }
+  private applyLeadFilterParams(params: Record<string, string>, filters?: LeadFilterParams) {
+    if (!filters) return
+
+    const entries = [
+      ['classification', filters.classification],
+      ['industry', filters.industry],
+      ['company', filters.company],
+    ] as const
+
+    for (const [key, filter] of entries) {
+      if (!filter?.value) continue
+      params[key] = filter.value
+      params[`${key}_mode`] = filter.mode || 'include'
+    }
   }
 }
 

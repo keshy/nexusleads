@@ -3,8 +3,9 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { Users, Globe, FolderKanban, Target, ExternalLink, Building2, Factory, Mail, Info, Filter, X, Sparkles, GitCommitHorizontal } from 'lucide-react'
 import ScoreTooltip from '../components/ScoreTooltip'
-import StyledSelect from '../components/StyledSelect'
+import FacetFilter from '../components/FacetFilter'
 import { formatNumber } from '../lib/utils'
+import { createEmptyFilter, isFilterActive } from '../lib/leadFilters'
 
 interface Lead {
   id: string
@@ -33,12 +34,20 @@ interface Lead {
 }
 
 export default function Dashboard() {
-  const [filterClassification, setFilterClassification] = useState('')
-  const [filterIndustry, setFilterIndustry] = useState('')
-  const [filterCompany, setFilterCompany] = useState('')
-  const [filterSource, setFilterSource] = useState('')
-  const [filterProject, setFilterProject] = useState('')
+  const [filterClassification, setFilterClassification] = useState(createEmptyFilter)
+  const [filterIndustry, setFilterIndustry] = useState(createEmptyFilter)
+  const [filterCompany, setFilterCompany] = useState(createEmptyFilter)
+  const [filterSource, setFilterSource] = useState(createEmptyFilter)
+  const [filterProject, setFilterProject] = useState(createEmptyFilter)
   const [expandedReasoning, setExpandedReasoning] = useState<Set<string>>(new Set())
+
+  const resultFilters = {
+    classification: isFilterActive(filterClassification) ? filterClassification : undefined,
+    industry: isFilterActive(filterIndustry) ? filterIndustry : undefined,
+    company: isFilterActive(filterCompany) ? filterCompany : undefined,
+  }
+
+  const hasScopedLeadFilters = Object.values(resultFilters).some(Boolean)
 
   const { data: stats, isLoading } = useQuery({
     queryKey: ['dashboard-stats'],
@@ -50,9 +59,38 @@ export default function Dashboard() {
     queryFn: () => api.getProjects(),
   })
 
-  const { data: topLeads = [] } = useQuery<Lead[]>({
-    queryKey: ['top-leads', filterSource, filterProject],
-    queryFn: () => api.getTopLeads(filterProject || undefined, filterSource || undefined),
+  const { data: baseTopLeads = [] } = useQuery<Lead[]>({
+    queryKey: ['top-leads-base', filterProject.value, filterProject.mode, filterSource.value, filterSource.mode],
+    queryFn: () => api.getTopLeads(
+      isFilterActive(filterProject) ? filterProject.value : undefined,
+      isFilterActive(filterSource) ? filterSource.value : undefined,
+      filterProject.mode,
+      filterSource.mode
+    ),
+  })
+
+  const { data: filteredTopLeads = [] } = useQuery<Lead[]>({
+    queryKey: [
+      'top-leads-filtered',
+      filterProject.value,
+      filterProject.mode,
+      filterSource.value,
+      filterSource.mode,
+      filterClassification.value,
+      filterClassification.mode,
+      filterIndustry.value,
+      filterIndustry.mode,
+      filterCompany.value,
+      filterCompany.mode,
+    ],
+    queryFn: () => api.getTopLeads(
+      isFilterActive(filterProject) ? filterProject.value : undefined,
+      isFilterActive(filterSource) ? filterSource.value : undefined,
+      filterProject.mode,
+      filterSource.mode,
+      resultFilters
+    ),
+    enabled: hasScopedLeadFilters,
   })
 
   const toggleReasoning = (id: string) => {
@@ -63,19 +101,18 @@ export default function Dashboard() {
     })
   }
 
-  const industries = useMemo(() => [...new Set(topLeads.map(l => l.industry).filter(Boolean))].sort() as string[], [topLeads])
-  const companies = useMemo(() => [...new Set(topLeads.map(l => l.current_company).filter(Boolean))].sort() as string[], [topLeads])
+  const topLeads = hasScopedLeadFilters ? filteredTopLeads : baseTopLeads
 
-  const filteredLeads = useMemo(() => {
-    return topLeads.filter(lead => {
-      if (filterClassification && lead.classification !== filterClassification) return false
-      if (filterIndustry && lead.industry !== filterIndustry) return false
-      if (filterCompany && lead.current_company !== filterCompany) return false
-      return true
-    })
-  }, [topLeads, filterClassification, filterIndustry, filterCompany])
+  const industries = useMemo(() => [...new Set(baseTopLeads.map(l => l.industry).filter(Boolean))].sort() as string[], [baseTopLeads])
+  const companies = useMemo(() => [...new Set(baseTopLeads.map(l => l.current_company).filter(Boolean))].sort() as string[], [baseTopLeads])
 
-  const hasActiveFilters = filterClassification || filterIndustry || filterCompany || filterSource || filterProject
+  const hasActiveFilters = [
+    filterClassification,
+    filterIndustry,
+    filterCompany,
+    filterSource,
+    filterProject,
+  ].some(isFilterActive)
 
   const getSourceBadge = (source?: string) => {
     if (source === 'stargazer') {
@@ -114,7 +151,7 @@ export default function Dashboard() {
   // Distribute cards across columns for masonry layout
   const columnCount = 3
   const columns: Lead[][] = Array.from({ length: columnCount }, () => [])
-  filteredLeads.forEach((lead, i) => {
+  topLeads.forEach((lead, i) => {
     columns[i % columnCount].push(lead)
   })
 
@@ -158,30 +195,38 @@ export default function Dashboard() {
       </div>
 
       {/* Filters */}
-      {topLeads.length > 0 && (
+      {baseTopLeads.length > 0 && (
         <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
           <div className="flex items-center gap-2 mb-3">
             <Filter className="w-4 h-4 text-gray-500" />
             <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Filter Leads</span>
-            <span className="text-xs text-gray-400 ml-1">({filteredLeads.length} of {topLeads.length})</span>
+            <span className="text-xs text-gray-400 ml-1">({topLeads.length} of {baseTopLeads.length})</span>
             {hasActiveFilters && (
               <button
-                onClick={() => { setFilterClassification(''); setFilterIndustry(''); setFilterCompany(''); setFilterSource(''); setFilterProject(''); }}
+                onClick={() => {
+                  setFilterClassification(createEmptyFilter())
+                  setFilterIndustry(createEmptyFilter())
+                  setFilterCompany(createEmptyFilter())
+                  setFilterSource(createEmptyFilter())
+                  setFilterProject(createEmptyFilter())
+                }}
                 className="ml-2 text-xs text-red-600 dark:text-red-400 hover:underline flex items-center"
               >
                 <X className="w-3 h-3 mr-1" /> Clear all
               </button>
             )}
           </div>
-          <div className="flex flex-wrap gap-3">
-            <StyledSelect
-              value={filterProject}
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
+            <FacetFilter
+              label="Project"
+              filter={filterProject}
               onChange={setFilterProject}
               placeholder="All Projects"
               options={[{ value: '', label: 'All Projects' }, ...projects.map(p => ({ value: p.id, label: p.name }))]}
             />
-            <StyledSelect
-              value={filterClassification}
+            <FacetFilter
+              label="Classification"
+              filter={filterClassification}
               onChange={setFilterClassification}
               placeholder="All Classifications"
               options={[
@@ -190,20 +235,23 @@ export default function Dashboard() {
                 { value: 'HIGH_IMPACT', label: 'High Impact' },
               ]}
             />
-            <StyledSelect
-              value={filterIndustry}
+            <FacetFilter
+              label="Industry"
+              filter={filterIndustry}
               onChange={setFilterIndustry}
               placeholder="All Industries"
               options={[{ value: '', label: 'All Industries' }, ...industries.map(ind => ({ value: ind, label: ind }))]}
             />
-            <StyledSelect
-              value={filterCompany}
+            <FacetFilter
+              label="Organization"
+              filter={filterCompany}
               onChange={setFilterCompany}
               placeholder="All Organizations"
               options={[{ value: '', label: 'All Organizations' }, ...companies.map(comp => ({ value: comp, label: comp }))]}
             />
-            <StyledSelect
-              value={filterSource}
+            <FacetFilter
+              label="Source"
+              filter={filterSource}
               onChange={setFilterSource}
               placeholder="All Sources"
               options={[
@@ -222,9 +270,9 @@ export default function Dashboard() {
           Top Leads Across All Projects
         </h2>
 
-        {filteredLeads.length === 0 ? (
+        {topLeads.length === 0 ? (
           <div className="text-center py-12 text-gray-500 dark:text-gray-400">
-            {topLeads.length === 0 ? 'No leads yet — source a repository to get started.' : 'No leads match the current filters.'}
+            {baseTopLeads.length === 0 ? 'No leads yet — source a repository to get started.' : 'No leads match the current filters.'}
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 items-start">

@@ -3,8 +3,9 @@ import { Link } from 'react-router-dom'
 import { ChevronDown, ChevronRight, ExternalLink, Mail, Building2, UserCheck, FolderKanban, Info, Filter, Factory, X, Sparkles, GitCommitHorizontal, Send, Download, Loader2, Cloud, UserPlus } from 'lucide-react'
 import Toast from '../components/Toast'
 import ScoreTooltip from '../components/ScoreTooltip'
-import StyledSelect from '../components/StyledSelect'
+import FacetFilter from '../components/FacetFilter'
 import { api } from '../lib/api'
+import { createEmptyFilter, isFilterActive } from '../lib/leadFilters'
 
 interface OrgUser {
   id: string
@@ -49,14 +50,15 @@ interface Project {
 
 export default function Leads() {
   const [projects, setProjects] = useState<Project[]>([])
+  const [optionProjects, setOptionProjects] = useState<Project[]>([])
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
   const [expandedReasoning, setExpandedReasoning] = useState<Set<string>>(new Set())
   const [expandedContributors, setExpandedContributors] = useState<Set<string>>(new Set())
-  const [filterClassification, setFilterClassification] = useState<string>('')
-  const [filterIndustry, setFilterIndustry] = useState<string>('')
-  const [filterCompany, setFilterCompany] = useState<string>('')
-  const [filterSource, setFilterSource] = useState<string>('')
+  const [filterClassification, setFilterClassification] = useState(createEmptyFilter)
+  const [filterIndustry, setFilterIndustry] = useState(createEmptyFilter)
+  const [filterCompany, setFilterCompany] = useState(createEmptyFilter)
+  const [filterSource, setFilterSource] = useState(createEmptyFilter)
   const [selectedLeads, setSelectedLeads] = useState<Set<string>>(new Set())
   const [pushing, setPushing] = useState(false)
   const [pushingLeadId, setPushingLeadId] = useState<string | null>(null)
@@ -69,7 +71,6 @@ export default function Leads() {
   const ownerDropdownRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    fetchLeadsByProject()
     api.getClayConfig().then((c: any) => setClayConfigured(c?.connected || false)).catch(() => setClayConfigured(false))
     const orgId = localStorage.getItem('activeOrgId')
     if (orgId) {
@@ -77,7 +78,24 @@ export default function Leads() {
         setOrgUsers(members.map((m: any) => ({ id: m.user_id, username: m.username, full_name: m.full_name })))
       }).catch(() => {})
     }
-  }, [filterSource])
+  }, [])
+
+  useEffect(() => {
+    fetchFilterOptionProjects()
+  }, [filterSource.value, filterSource.mode])
+
+  useEffect(() => {
+    fetchLeadsByProject()
+  }, [
+    filterSource.value,
+    filterSource.mode,
+    filterClassification.value,
+    filterClassification.mode,
+    filterIndustry.value,
+    filterIndustry.mode,
+    filterCompany.value,
+    filterCompany.mode,
+  ])
 
   // Close owner dropdown on outside click
   useEffect(() => {
@@ -90,10 +108,32 @@ export default function Leads() {
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
+  const resultFilters = {
+    classification: isFilterActive(filterClassification) ? filterClassification : undefined,
+    industry: isFilterActive(filterIndustry) ? filterIndustry : undefined,
+    company: isFilterActive(filterCompany) ? filterCompany : undefined,
+  }
+
+  const fetchFilterOptionProjects = async () => {
+    try {
+      const data = await api.getLeadsByProject(
+        isFilterActive(filterSource) ? filterSource.value : undefined,
+        filterSource.mode
+      )
+      setOptionProjects(data)
+    } catch (error) {
+      console.error('Error fetching lead filter options:', error)
+    }
+  }
+
   const fetchLeadsByProject = async () => {
     try {
       setLoading(true)
-      const data = await api.getLeadsByProject(filterSource || undefined)
+      const data = await api.getLeadsByProject(
+        isFilterActive(filterSource) ? filterSource.value : undefined,
+        filterSource.mode,
+        resultFilters
+      )
       setProjects(data)
       // Expand first project by default
       if (data.length > 0) {
@@ -258,20 +298,19 @@ export default function Leads() {
 
   // Collect unique filter values
   const allLeads = useMemo(() => projects.flatMap(p => p.leads), [projects])
-  const industries = useMemo(() => [...new Set(allLeads.map(l => l.industry).filter(Boolean))].sort() as string[], [allLeads])
-  const companies = useMemo(() => [...new Set(allLeads.map(l => l.current_company).filter(Boolean))].sort() as string[], [allLeads])
+  const optionLeads = useMemo(() => optionProjects.flatMap(p => p.leads), [optionProjects])
+  const industries = useMemo(() => [...new Set(optionLeads.map(l => l.industry).filter(Boolean))].sort() as string[], [optionLeads])
+  const companies = useMemo(() => [...new Set(optionLeads.map(l => l.current_company).filter(Boolean))].sort() as string[], [optionLeads])
 
   // Filter leads per project
-  const filterLeads = (leads: Lead[]) => {
-    return leads.filter(lead => {
-      if (filterClassification && lead.classification !== filterClassification) return false
-      if (filterIndustry && lead.industry !== filterIndustry) return false
-      if (filterCompany && lead.current_company !== filterCompany) return false
-      return true
-    })
-  }
+  const filterLeads = (leads: Lead[]) => leads
 
-  const hasActiveFilters = filterClassification || filterIndustry || filterCompany || filterSource
+  const hasActiveFilters = [
+    filterClassification,
+    filterIndustry,
+    filterCompany,
+    filterSource,
+  ].some(isFilterActive)
 
   const getScoreColor = (score?: number) => {
     if (!score) return 'text-gray-400'
@@ -403,16 +442,22 @@ export default function Leads() {
             <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Filters</span>
             {hasActiveFilters && (
               <button
-                onClick={() => { setFilterClassification(''); setFilterIndustry(''); setFilterCompany(''); setFilterSource(''); }}
+                onClick={() => {
+                  setFilterClassification(createEmptyFilter())
+                  setFilterIndustry(createEmptyFilter())
+                  setFilterCompany(createEmptyFilter())
+                  setFilterSource(createEmptyFilter())
+                }}
                 className="ml-2 text-xs text-red-600 dark:text-red-400 hover:underline flex items-center"
               >
                 <X className="w-3 h-3 mr-1" /> Clear all
               </button>
             )}
           </div>
-          <div className="flex flex-wrap gap-3">
-            <StyledSelect
-              value={filterClassification}
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <FacetFilter
+              label="Classification"
+              filter={filterClassification}
               onChange={setFilterClassification}
               placeholder="All Classifications"
               options={[
@@ -421,20 +466,23 @@ export default function Leads() {
                 { value: 'HIGH_IMPACT', label: 'High Impact' },
               ]}
             />
-            <StyledSelect
-              value={filterIndustry}
+            <FacetFilter
+              label="Industry"
+              filter={filterIndustry}
               onChange={setFilterIndustry}
               placeholder="All Industries"
               options={[{ value: '', label: 'All Industries' }, ...industries.map(ind => ({ value: ind, label: ind }))]}
             />
-            <StyledSelect
-              value={filterCompany}
+            <FacetFilter
+              label="Company"
+              filter={filterCompany}
               onChange={setFilterCompany}
               placeholder="All Companies"
               options={[{ value: '', label: 'All Companies' }, ...companies.map(comp => ({ value: comp, label: comp }))]}
             />
-            <StyledSelect
-              value={filterSource}
+            <FacetFilter
+              label="Lead Type"
+              filter={filterSource}
               onChange={setFilterSource}
               placeholder="All Lead Types"
               options={[

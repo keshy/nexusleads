@@ -1,5 +1,5 @@
 """Dashboard router."""
-from typing import List, Optional
+from typing import List, Literal, Optional
 from uuid import UUID
 from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.orm import Session
@@ -16,6 +16,27 @@ from schemas import DashboardStats, SourceLeadStats
 from settings_service import get_excluded_organizations
 
 router = APIRouter()
+
+
+def apply_value_filter(query, column, value: str | None, mode: Literal["include", "exclude"]):
+    if not value:
+        return query
+    if mode == "exclude":
+        return query.filter((column.is_(None)) | (column != value))
+    return query.filter(column == value)
+
+
+def apply_excluded_org_filter(query, email_column, company_column, excluded_domains: list[str]):
+    if not excluded_domains:
+        return query
+
+    from sqlalchemy import or_
+
+    exclude_conditions = []
+    for domain in excluded_domains:
+        exclude_conditions.append(func.coalesce(email_column, '').ilike(f'%@{domain}'))
+        exclude_conditions.append(func.coalesce(company_column, '').ilike(f'%{domain.split(".")[0]}%'))
+    return query.filter(~or_(*exclude_conditions))
 
 
 @router.get("/stats", response_model=DashboardStats)
@@ -240,7 +261,15 @@ async def get_recent_activity(
 @router.get("/top-leads")
 async def get_top_leads(
     project_id: UUID = None,
+    project_mode: Literal["include", "exclude"] = "include",
     source: str = None,
+    source_mode: Literal["include", "exclude"] = "include",
+    classification: str = None,
+    classification_mode: Literal["include", "exclude"] = "include",
+    industry: str = None,
+    industry_mode: Literal["include", "exclude"] = "include",
+    company: str = None,
+    company_mode: Literal["include", "exclude"] = "include",
     limit: int = 50,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
@@ -256,6 +285,13 @@ async def get_top_leads(
     from sqlalchemy import over, literal_column
     from sqlalchemy.sql.expression import text as sql_text
 
+    project_scope = db.query(Project.id).filter(Project.org_id == org_id)
+    if project_id:
+        if project_mode == "exclude":
+            project_scope = project_scope.filter(Project.id != project_id)
+        else:
+            project_scope = project_scope.filter(Project.id == project_id)
+
     base_q = db.query(
         LeadScore.id.label("ls_id"),
         func.row_number().over(
@@ -265,10 +301,8 @@ async def get_top_leads(
     ).join(
         Project, LeadScore.project_id == Project.id
     ).filter(
-        Project.org_id == org_id
+        LeadScore.project_id.in_(project_scope)
     )
-    if project_id:
-        base_q = base_q.filter(LeadScore.project_id == project_id)
     best_sq = base_q.subquery()
 
     query = db.query(LeadScore, Member, SocialContext, Project.name).join(
@@ -281,35 +315,29 @@ async def get_top_leads(
     ).join(
         Project, LeadScore.project_id == Project.id
     ).filter(
-        Project.org_id == org_id,
+        LeadScore.project_id.in_(project_scope),
         SocialContext.classification.in_(['DECISION_MAKER', 'HIGH_IMPACT'])
     )
-    
-    if project_id:
-        query = query.filter(LeadScore.project_id == project_id)
 
     if source:
-        query = query.filter(
-            Member.id.in_(
-                db.query(MemberActivity.member_id).join(
-                    CommunitySource, MemberActivity.source_id == CommunitySource.id
-                ).filter(
-                    CommunitySource.project_id.in_(
-                        db.query(Project.id).filter(Project.org_id == org_id)
-                    ),
-                    MemberActivity.source == source
-                )
-            )
+        source_member_ids = db.query(MemberActivity.member_id).join(
+            CommunitySource, MemberActivity.source_id == CommunitySource.id
+        ).filter(
+            CommunitySource.project_id.in_(project_scope),
+            MemberActivity.source == source
         )
+        query = query.filter(
+            Member.id.in_(source_member_ids)
+            if source_mode == "include"
+            else ~Member.id.in_(source_member_ids)
+        )
+
+    query = apply_value_filter(query, SocialContext.classification, classification, classification_mode)
+    query = apply_value_filter(query, SocialContext.industry, industry, industry_mode)
+    query = apply_value_filter(query, func.coalesce(SocialContext.current_company, Member.company), company, company_mode)
     
     # Exclude members from excluded organizations (match on email domain or company name)
-    if excluded_domains:
-        from sqlalchemy import or_
-        exclude_conditions = []
-        for domain in excluded_domains:
-            exclude_conditions.append(Member.email.ilike(f'%@{domain}'))
-            exclude_conditions.append(SocialContext.current_company.ilike(f'%{domain.split(".")[0]}%'))
-        query = query.filter(~or_(*exclude_conditions))
+    query = apply_excluded_org_filter(query, Member.email, SocialContext.current_company, excluded_domains)
     
     results = query.order_by(desc(LeadScore.overall_score)).limit(limit).all()
     

@@ -1,9 +1,9 @@
 """Members router (generalized from contributors)."""
-from typing import List, Optional
+from typing import List, Literal, Optional
 from uuid import UUID
 from fastapi import APIRouter, Depends, Header, HTTPException, status, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, desc, or_
+from sqlalchemy import and_, desc, func, or_
 from database import get_db
 from auth import get_current_active_user
 from org_context import require_org
@@ -20,6 +20,24 @@ from datetime import datetime
 from settings_service import get_excluded_organizations
 
 router = APIRouter()
+
+def apply_value_filter(query, column, value: str | None, mode: Literal["include", "exclude"]):
+    if not value:
+        return query
+    if mode == "exclude":
+        return query.filter((column.is_(None)) | (column != value))
+    return query.filter(column == value)
+
+
+def apply_excluded_org_filter(query, email_column, company_column, excluded_domains: list[str]):
+    if not excluded_domains:
+        return query
+
+    exclude_conditions = []
+    for domain in excluded_domains:
+        exclude_conditions.append(func.coalesce(email_column, '').ilike(f'%@{domain}'))
+        exclude_conditions.append(func.coalesce(company_column, '').ilike(f'%{domain.split(".")[0]}%'))
+    return query.filter(~or_(*exclude_conditions))
 
 def aggregate_activity_rows(member_id: UUID, activity_rows: List[MemberActivity]) -> MemberActivityResponse | None:
     """Aggregate member activity across sources."""
@@ -78,6 +96,13 @@ def aggregate_activity_rows(member_id: UUID, activity_rows: List[MemberActivity]
 @router.get("/by-project", response_model=List[dict])
 async def get_leads_by_project(
     source: str = None,
+    source_mode: Literal["include", "exclude"] = "include",
+    classification: str = None,
+    classification_mode: Literal["include", "exclude"] = "include",
+    industry: str = None,
+    industry_mode: Literal["include", "exclude"] = "include",
+    company: str = None,
+    company_mode: Literal["include", "exclude"] = "include",
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
     org_id = Depends(require_org),
@@ -102,24 +127,24 @@ async def get_leads_by_project(
             )
 
         # Exclude members from excluded organizations
-        if excluded_domains:
-            exclude_conditions = []
-            for domain in excluded_domains:
-                exclude_conditions.append(Member.email.ilike(f'%@{domain}'))
-                exclude_conditions.append(SocialContext.current_company.ilike(f'%{domain.split(".")[0]}%'))
-            leads_query = leads_query.filter(~or_(*exclude_conditions))
+        leads_query = apply_excluded_org_filter(leads_query, Member.email, SocialContext.current_company, excluded_domains)
 
         if source:
-            leads_query = leads_query.filter(
-                Member.id.in_(
-                    db.query(MemberActivity.member_id).join(
-                        CommunitySource, MemberActivity.source_id == CommunitySource.id
-                    ).filter(
-                        CommunitySource.project_id == project.id,
-                        MemberActivity.source == source
-                    )
-                )
+            source_member_ids = db.query(MemberActivity.member_id).join(
+                CommunitySource, MemberActivity.source_id == CommunitySource.id
+            ).filter(
+                CommunitySource.project_id == project.id,
+                MemberActivity.source == source
             )
+            leads_query = leads_query.filter(
+                Member.id.in_(source_member_ids)
+                if source_mode == "include"
+                else ~Member.id.in_(source_member_ids)
+            )
+
+        leads_query = apply_value_filter(leads_query, SocialContext.classification, classification, classification_mode)
+        leads_query = apply_value_filter(leads_query, SocialContext.industry, industry, industry_mode)
+        leads_query = apply_value_filter(leads_query, func.coalesce(SocialContext.current_company, Member.company), company, company_mode)
 
         leads = leads_query.order_by(desc(LeadScore.overall_score))\
             .limit(50)\
@@ -187,12 +212,7 @@ async def get_leads_by_project(
                 ~Member.id.in_([l["id"] for l in leads_list]) if leads_list else True
             )
 
-        if excluded_domains:
-            exclude_conditions_others = []
-            for domain in excluded_domains:
-                exclude_conditions_others.append(Member.email.ilike(f'%@{domain}'))
-                exclude_conditions_others.append(SocialContext.current_company.ilike(f'%{domain.split(".")[0]}%'))
-            others_query = others_query.filter(~or_(*exclude_conditions_others))
+        others_query = apply_excluded_org_filter(others_query, Member.email, SocialContext.current_company, excluded_domains)
 
         others_query = others_query.order_by(desc(LeadScore.overall_score))\
             .limit(100)\

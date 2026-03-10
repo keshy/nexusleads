@@ -12,9 +12,17 @@ interface StyledSelectProps {
   options: Option[]
   placeholder: string
   className?: string
+  tone?: 'neutral' | 'include' | 'exclude'
 }
 
-export default function StyledSelect({ value, onChange, options, placeholder, className }: StyledSelectProps) {
+export default function StyledSelect({
+  value,
+  onChange,
+  options,
+  placeholder,
+  className,
+  tone = 'neutral',
+}: StyledSelectProps) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -27,6 +35,14 @@ export default function StyledSelect({ value, onChange, options, placeholder, cl
   }, [])
 
   const selected = options.find(o => o.value === value)
+  const activeTone = value ? tone : 'neutral'
+  const activeButtonClasses = activeTone === 'exclude'
+    ? 'border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-300 dark:border-rose-400/30 dark:bg-rose-400/10 hover:border-rose-500/60 dark:hover:border-rose-400/50'
+    : 'border-cyan-500/40 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 dark:border-cyan-400/30 dark:bg-cyan-400/10 hover:border-cyan-500/60 dark:hover:border-cyan-400/50'
+  const activeOptionClasses = activeTone === 'exclude'
+    ? 'bg-rose-50 dark:bg-rose-900/20 text-rose-700 dark:text-rose-300'
+    : 'bg-cyan-50 dark:bg-cyan-900/20 text-cyan-700 dark:text-cyan-300'
+  const activeCheckColor = activeTone === 'exclude' ? 'text-rose-500' : 'text-cyan-500'
 
   return (
     <div ref={ref} className="relative">
@@ -37,10 +53,9 @@ export default function StyledSelect({ value, onChange, options, placeholder, cl
           flex items-center justify-between gap-2 px-3 py-1.5 text-sm rounded-lg
           border transition-all duration-150 ${className || 'min-w-[160px]'}
           ${value
-            ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 dark:border-cyan-400/30 dark:bg-cyan-400/10'
+            ? activeButtonClasses
             : 'border-gray-200 dark:border-gray-600 bg-white/80 dark:bg-gray-800/80 text-gray-700 dark:text-gray-300'
           }
-          hover:border-cyan-500/60 dark:hover:border-cyan-400/50
           backdrop-blur-sm
         `}
       >
@@ -58,13 +73,13 @@ export default function StyledSelect({ value, onChange, options, placeholder, cl
                 className={`
                   w-full flex items-center justify-between px-3 py-2 text-sm transition-colors
                   ${option.value === value
-                    ? 'bg-cyan-50 dark:bg-cyan-900/20 text-cyan-700 dark:text-cyan-300'
+                    ? activeOptionClasses
                     : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50'
                   }
                 `}
               >
                 <span className="truncate">{option.label}</span>
-                {option.value === value && <Check className="w-3.5 h-3.5 flex-shrink-0 text-cyan-500" />}
+                {option.value === value && <Check className={`w-3.5 h-3.5 flex-shrink-0 ${activeCheckColor}`} />}
               </button>
             ))}
           </div>
