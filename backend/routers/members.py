@@ -21,12 +21,12 @@ from settings_service import get_excluded_organizations
 
 router = APIRouter()
 
-def apply_value_filter(query, column, value: str | None, mode: Literal["include", "exclude"]):
-    if not value:
+def apply_value_filter(query, column, values: list[str] | None, mode: Literal["include", "exclude"]):
+    if not values:
         return query
     if mode == "exclude":
-        return query.filter((column.is_(None)) | (column != value))
-    return query.filter(column == value)
+        return query.filter((column.is_(None)) | (~column.in_(values)))
+    return query.filter(column.in_(values))
 
 
 def apply_excluded_org_filter(query, email_column, company_column, excluded_domains: list[str]):
@@ -95,13 +95,13 @@ def aggregate_activity_rows(member_id: UUID, activity_rows: List[MemberActivity]
 
 @router.get("/by-project", response_model=List[dict])
 async def get_leads_by_project(
-    source: str = None,
+    source: list[str] | None = Query(None),
     source_mode: Literal["include", "exclude"] = "include",
-    classification: str = None,
+    classification: list[str] | None = Query(None),
     classification_mode: Literal["include", "exclude"] = "include",
-    industry: str = None,
+    industry: list[str] | None = Query(None),
     industry_mode: Literal["include", "exclude"] = "include",
-    company: str = None,
+    company: list[str] | None = Query(None),
     company_mode: Literal["include", "exclude"] = "include",
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
@@ -134,7 +134,7 @@ async def get_leads_by_project(
                 CommunitySource, MemberActivity.source_id == CommunitySource.id
             ).filter(
                 CommunitySource.project_id == project.id,
-                MemberActivity.source == source
+                MemberActivity.source.in_(source)
             )
             leads_query = leads_query.filter(
                 Member.id.in_(source_member_ids)

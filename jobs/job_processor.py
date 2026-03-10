@@ -3,7 +3,7 @@ import logging
 import random
 import time
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional
 from sqlalchemy.orm import Session
 
@@ -531,6 +531,9 @@ class JobProcessor:
             job.completed_at = datetime.utcnow()
             job.progress_percentage = 100
             db.commit()
+
+            # Advance next_sourcing_at for periodic scheduling
+            self._advance_next_sourcing(db, repository)
             
             logger.info(f"Completed repository sourcing job {job.id}")
 
@@ -1166,6 +1169,9 @@ class JobProcessor:
             job.progress_percentage = 100
             db.commit()
 
+            # Advance next_sourcing_at for periodic scheduling
+            self._advance_next_sourcing(db, source)
+
             logger.info(f"Completed source_ingestion job {job.id}: {processed_count} members")
 
             self._check_auto_export(db, job)
@@ -1418,6 +1424,55 @@ class JobProcessor:
             job.completed_at = datetime.utcnow()
             db.commit()
 
+    INTERVAL_DAYS = {'daily': 1, 'weekly': 7, 'monthly': 30}
+
+    def _advance_next_sourcing(self, db: Session, source: CommunitySource):
+        """Advance next_sourcing_at based on the source's interval after a scan completes."""
+        days = self.INTERVAL_DAYS.get(source.sourcing_interval, 30)
+        source.next_sourcing_at = datetime.utcnow() + timedelta(days=days)
+        db.commit()
+        logger.info(f"Next scan for source {source.full_name} scheduled at {source.next_sourcing_at}")
+
+    def check_scheduled_sources(self, db: Session):
+        """Create jobs for active sources whose next_sourcing_at is due.
+        Idempotent: skips sources that already have a pending or running job."""
+        from sqlalchemy import and_, exists
+
+        now = datetime.utcnow()
+        due_sources = db.query(CommunitySource).filter(
+            CommunitySource.is_active == True,
+            CommunitySource.next_sourcing_at != None,
+            CommunitySource.next_sourcing_at <= now,
+        ).all()
+
+        created = 0
+        for source in due_sources:
+            # Skip if there's already a pending/running job for this source
+            has_active_job = db.query(SourcingJob).filter(
+                SourcingJob.source_id == source.id,
+                SourcingJob.status.in_(['pending', 'running']),
+            ).first()
+            if has_active_job:
+                continue
+
+            # Determine job type based on source_type
+            job_type = 'source_ingestion' if source.source_type != 'github_repo' else 'repository_sourcing'
+
+            job = SourcingJob(
+                project_id=source.project_id,
+                source_id=source.id,
+                job_type=job_type,
+                status='pending',
+                job_metadata={'triggered_by': 'scheduler'},
+            )
+            db.add(job)
+            created += 1
+            logger.info(f"Scheduled {job_type} job for source {source.full_name} (due: {source.next_sourcing_at})")
+
+        if created:
+            db.commit()
+            logger.info(f"Created {created} scheduled sourcing jobs")
+
     def recover_orphaned_jobs(self, db: Session):
         """Reset any 'running' jobs back to 'pending' on startup (handles container restarts).
         Note: out_of_credits jobs are NOT recovered — they wait for credits to be added."""
@@ -1495,6 +1550,12 @@ class JobProcessor:
         while True:
             try:
                 db = SessionLocal()
+
+                # Check for sources due for periodic re-scan
+                try:
+                    self.check_scheduled_sources(db)
+                except Exception as e:
+                    logger.error(f"Error checking scheduled sources: {e}")
                 
                 # Get pending jobs
                 pending_jobs = self.claim_pending_jobs(db)

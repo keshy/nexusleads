@@ -5,7 +5,7 @@ import Toast from '../components/Toast'
 import ScoreTooltip from '../components/ScoreTooltip'
 import FacetFilter from '../components/FacetFilter'
 import { api } from '../lib/api'
-import { createEmptyFilter, isFilterActive } from '../lib/leadFilters'
+import { createEmptyFilter, isFilterActive, serializeFilter } from '../lib/leadFilters'
 
 interface OrgUser {
   id: string
@@ -82,19 +82,15 @@ export default function Leads() {
 
   useEffect(() => {
     fetchFilterOptionProjects()
-  }, [filterSource.value, filterSource.mode])
+  }, [serializeFilter(filterSource)])
 
   useEffect(() => {
     fetchLeadsByProject()
   }, [
-    filterSource.value,
-    filterSource.mode,
-    filterClassification.value,
-    filterClassification.mode,
-    filterIndustry.value,
-    filterIndustry.mode,
-    filterCompany.value,
-    filterCompany.mode,
+    serializeFilter(filterSource),
+    serializeFilter(filterClassification),
+    serializeFilter(filterIndustry),
+    serializeFilter(filterCompany),
   ])
 
   // Close owner dropdown on outside click
@@ -117,7 +113,7 @@ export default function Leads() {
   const fetchFilterOptionProjects = async () => {
     try {
       const data = await api.getLeadsByProject(
-        isFilterActive(filterSource) ? filterSource.value : undefined,
+        isFilterActive(filterSource) ? filterSource.values : undefined,
         filterSource.mode
       )
       setOptionProjects(data)
@@ -130,7 +126,7 @@ export default function Leads() {
     try {
       setLoading(true)
       const data = await api.getLeadsByProject(
-        isFilterActive(filterSource) ? filterSource.value : undefined,
+        isFilterActive(filterSource) ? filterSource.values : undefined,
         filterSource.mode,
         resultFilters
       )

@@ -5,7 +5,7 @@ import { Users, Globe, FolderKanban, Target, ExternalLink, Building2, Factory, M
 import ScoreTooltip from '../components/ScoreTooltip'
 import FacetFilter from '../components/FacetFilter'
 import { formatNumber } from '../lib/utils'
-import { createEmptyFilter, isFilterActive } from '../lib/leadFilters'
+import { createEmptyFilter, isFilterActive, serializeFilter } from '../lib/leadFilters'
 
 interface Lead {
   id: string
@@ -60,10 +60,10 @@ export default function Dashboard() {
   })
 
   const { data: baseTopLeads = [] } = useQuery<Lead[]>({
-    queryKey: ['top-leads-base', filterProject.value, filterProject.mode, filterSource.value, filterSource.mode],
+    queryKey: ['top-leads-base', serializeFilter(filterProject), serializeFilter(filterSource)],
     queryFn: () => api.getTopLeads(
-      isFilterActive(filterProject) ? filterProject.value : undefined,
-      isFilterActive(filterSource) ? filterSource.value : undefined,
+      isFilterActive(filterProject) ? filterProject.values : undefined,
+      isFilterActive(filterSource) ? filterSource.values : undefined,
       filterProject.mode,
       filterSource.mode
     ),
@@ -72,20 +72,15 @@ export default function Dashboard() {
   const { data: filteredTopLeads = [] } = useQuery<Lead[]>({
     queryKey: [
       'top-leads-filtered',
-      filterProject.value,
-      filterProject.mode,
-      filterSource.value,
-      filterSource.mode,
-      filterClassification.value,
-      filterClassification.mode,
-      filterIndustry.value,
-      filterIndustry.mode,
-      filterCompany.value,
-      filterCompany.mode,
+      serializeFilter(filterProject),
+      serializeFilter(filterSource),
+      serializeFilter(filterClassification),
+      serializeFilter(filterIndustry),
+      serializeFilter(filterCompany),
     ],
     queryFn: () => api.getTopLeads(
-      isFilterActive(filterProject) ? filterProject.value : undefined,
-      isFilterActive(filterSource) ? filterSource.value : undefined,
+      isFilterActive(filterProject) ? filterProject.values : undefined,
+      isFilterActive(filterSource) ? filterSource.values : undefined,
       filterProject.mode,
       filterSource.mode,
       resultFilters

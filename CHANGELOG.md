@@ -8,10 +8,15 @@
 - **FacetFilter component** (`frontend/src/components/FacetFilter.tsx`) — reusable filter dropdown with built-in include/exclude toggle
 - **Server-side exclusion support** — `GET /api/dashboard/top-leads` and `GET /api/members/` accept `exclude_classification`, `exclude_industry`, `exclude_company` query params so exclusions apply before the LIMIT, not after
 - **StyledSelect enhancements** — supports `tone` prop for visual feedback (red tint in exclude mode)
+- **Periodic sourcing scheduler** — job processor main loop now checks for sources whose `next_sourcing_at` is due and auto-creates scan jobs; idempotent (skips sources with pending/running jobs)
+- **`next_sourcing_at` advancement** — after `repository_sourcing` or `source_ingestion` completes, `next_sourcing_at` is advanced by the source's interval (daily/weekly/monthly), ensuring the cycle continues across restarts and deployments
 
 ### Changed
 - Dashboard and Leads filter bars refactored to use shared `FacetFilter` component
 - `api.ts` updated with new query param support for exclusion filters
+
+### Fixed
+- **Periodic sourcing was non-functional** — `sourcing_interval` and `next_sourcing_at` columns existed but nothing read them; `schedule` library was in requirements.txt but never used
 
 ---
 

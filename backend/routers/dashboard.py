@@ -1,7 +1,7 @@
 """Dashboard router."""
 from typing import List, Literal, Optional
 from uuid import UUID
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
 from datetime import datetime
@@ -18,12 +18,12 @@ from settings_service import get_excluded_organizations
 router = APIRouter()
 
 
-def apply_value_filter(query, column, value: str | None, mode: Literal["include", "exclude"]):
-    if not value:
+def apply_value_filter(query, column, values: list[str] | None, mode: Literal["include", "exclude"]):
+    if not values:
         return query
     if mode == "exclude":
-        return query.filter((column.is_(None)) | (column != value))
-    return query.filter(column == value)
+        return query.filter((column.is_(None)) | (~column.in_(values)))
+    return query.filter(column.in_(values))
 
 
 def apply_excluded_org_filter(query, email_column, company_column, excluded_domains: list[str]):
@@ -260,15 +260,15 @@ async def get_recent_activity(
 
 @router.get("/top-leads")
 async def get_top_leads(
-    project_id: UUID = None,
+    project_id: list[UUID] | None = Query(None),
     project_mode: Literal["include", "exclude"] = "include",
-    source: str = None,
+    source: list[str] | None = Query(None),
     source_mode: Literal["include", "exclude"] = "include",
-    classification: str = None,
+    classification: list[str] | None = Query(None),
     classification_mode: Literal["include", "exclude"] = "include",
-    industry: str = None,
+    industry: list[str] | None = Query(None),
     industry_mode: Literal["include", "exclude"] = "include",
-    company: str = None,
+    company: list[str] | None = Query(None),
     company_mode: Literal["include", "exclude"] = "include",
     limit: int = 50,
     db: Session = Depends(get_db),
@@ -288,9 +288,9 @@ async def get_top_leads(
     project_scope = db.query(Project.id).filter(Project.org_id == org_id)
     if project_id:
         if project_mode == "exclude":
-            project_scope = project_scope.filter(Project.id != project_id)
+            project_scope = project_scope.filter(~Project.id.in_(project_id))
         else:
-            project_scope = project_scope.filter(Project.id == project_id)
+            project_scope = project_scope.filter(Project.id.in_(project_id))
 
     base_q = db.query(
         LeadScore.id.label("ls_id"),
@@ -324,7 +324,7 @@ async def get_top_leads(
             CommunitySource, MemberActivity.source_id == CommunitySource.id
         ).filter(
             CommunitySource.project_id.in_(project_scope),
-            MemberActivity.source == source
+            MemberActivity.source.in_(source)
         )
         query = query.filter(
             Member.id.in_(source_member_ids)

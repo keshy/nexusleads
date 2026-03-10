@@ -2,7 +2,7 @@ import axios, { AxiosInstance, InternalAxiosRequestConfig } from 'axios'
 import type { FilterMode } from './leadFilters'
 
 interface LeadFilterParam {
-  value?: string
+  values?: string[]
   mode?: FilterMode
 }
 
@@ -290,19 +290,28 @@ class ApiClient {
   }
 
   async getTopLeads(
-    projectId?: string,
-    source?: string,
+    projectId?: string | string[],
+    source?: string | string[],
     projectMode: FilterMode = 'include',
     sourceMode: FilterMode = 'include',
     filters?: LeadFilterParams
   ) {
-    const params: Record<string, string> = {}
-    if (projectId) params.project_id = projectId
-    if (source) params.source = source
-    if (projectId) params.project_mode = projectMode
-    if (source) params.source_mode = sourceMode
-    this.applyLeadFilterParams(params, filters)
-    const response = await this.client.get('/api/dashboard/top-leads', { params })
+    const params = new URLSearchParams()
+    if (projectId) {
+      for (const value of (Array.isArray(projectId) ? projectId : [projectId])) {
+        params.append('project_id', value)
+      }
+      params.append('project_mode', projectMode)
+    }
+    if (source) {
+      for (const value of (Array.isArray(source) ? source : [source])) {
+        params.append('source', value)
+      }
+      params.append('source_mode', sourceMode)
+    }
+    const response = await this.client.get('/api/dashboard/top-leads', {
+      params: this.applyLeadFilterParams(params, filters),
+    })
     return response.data
   }
 
@@ -327,12 +336,17 @@ class ApiClient {
   }
 
   // Leads
-  async getLeadsByProject(source?: string, sourceMode: FilterMode = 'include', filters?: LeadFilterParams) {
-    const params: Record<string, string> = {}
-    if (source) params.source = source
-    if (source) params.source_mode = sourceMode
-    this.applyLeadFilterParams(params, filters)
-    const response = await this.client.get('/api/leads/by-project', { params })
+  async getLeadsByProject(source?: string | string[], sourceMode: FilterMode = 'include', filters?: LeadFilterParams) {
+    const params = new URLSearchParams()
+    if (source) {
+      for (const value of (Array.isArray(source) ? source : [source])) {
+        params.append('source', value)
+      }
+      params.append('source_mode', sourceMode)
+    }
+    const response = await this.client.get('/api/leads/by-project', {
+      params: this.applyLeadFilterParams(params, filters),
+    })
     return response.data
   }
 
@@ -484,8 +498,8 @@ class ApiClient {
   async listChatConversations(_orgId?: string) {
     return this.getChatConversations()
   }
-  private applyLeadFilterParams(params: Record<string, string>, filters?: LeadFilterParams) {
-    if (!filters) return
+  private applyLeadFilterParams(params: URLSearchParams, filters?: LeadFilterParams) {
+    if (!filters) return params
 
     const entries = [
       ['classification', filters.classification],
@@ -494,10 +508,13 @@ class ApiClient {
     ] as const
 
     for (const [key, filter] of entries) {
-      if (!filter?.value) continue
-      params[key] = filter.value
-      params[`${key}_mode`] = filter.mode || 'include'
+      if (!filter?.values?.length) continue
+      for (const value of filter.values) {
+        params.append(key, value)
+      }
+      params.append(`${key}_mode`, filter.mode || 'include')
     }
+    return params
   }
 }
 

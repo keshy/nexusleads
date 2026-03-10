@@ -1,4 +1,4 @@
-import StyledSelect from './StyledSelect'
+import FilterMultiSelect from './FilterMultiSelect'
 import { getFilterTone, isFilterActive, type SelectFilterState } from '../lib/leadFilters'
 
 interface Option {
@@ -47,9 +47,9 @@ export default function FacetFilter({
         >
           {exclude ? 'is not' : 'is'}
         </button>
-        <StyledSelect
-          value={filter.value}
-          onChange={(value) => onChange({ ...filter, value })}
+        <FilterMultiSelect
+          values={filter.values}
+          onChange={(values) => onChange({ ...filter, values })}
           options={options}
           placeholder={placeholder}
           tone={getFilterTone(filter)}
